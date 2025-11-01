@@ -106,26 +106,21 @@ def cmd_admin_create(args):
         if container_name and waited < max_wait:
             print(f"Creating admin via Docker container ({container_name})...")
             
-            # Use base64 to safely pass password through command line
-            import base64
-            import json
-            
             # Create Python script to run inside container
-            # Use JSON to safely pass the password
-            password_json = json.dumps(password)
-            username_json = json.dumps(username)
+            # Use repr to safely escape strings for Python code
+            username_repr = repr(username)
+            password_repr = repr(password)
             
             script = f"""
 import asyncio
 import sys
-import json
 from app.database import AsyncSessionLocal, init_db
 from app.models import Admin
 from sqlalchemy import select
 from passlib.context import CryptContext
 
-username = json.loads({username_json})
-password = json.loads({password_json})
+username = {username_repr}
+password = {password_repr}
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
