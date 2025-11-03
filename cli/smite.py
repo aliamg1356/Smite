@@ -99,7 +99,18 @@ def run_docker_compose(args, capture_output=False):
 def cmd_admin_create(args):
     """Create admin user"""
     username = args.username or input("Username: ")
-    password = args.password or getpass.getpass("Password: ")
+    
+    if args.password:
+        password = args.password
+    else:
+        # Ask for password twice for confirmation
+        while True:
+            password = getpass.getpass("Password: ")
+            password_confirm = getpass.getpass("Confirm Password: ")
+            if password == password_confirm:
+                break
+            else:
+                print("Passwords do not match. Please try again.")
     
     # First try: Use Docker exec (works on fresh installs)
     try:
