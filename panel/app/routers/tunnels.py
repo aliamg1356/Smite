@@ -127,11 +127,15 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
             debug_print(f"DEBUG: Tunnel {db_tunnel.id} applied successfully, status={response.get('status')}")
             db_tunnel.status = "active"
             
+            debug_print("DEBUG: About to enter try block for forwarding setup")
             try:
+                debug_print("DEBUG: Inside try block for forwarding setup")
                 # Start forwarding on panel using gost (for TCP/UDP/WS/gRPC tunnels)
                 # Rathole: reverse tunnel, needs Rathole server on panel
                 needs_gost_forwarding = db_tunnel.type in ["tcp", "udp", "ws", "grpc"] and db_tunnel.core == "xray"
                 needs_rathole_server = db_tunnel.core == "rathole"
+                
+                debug_print(f"DEBUG: Calculated needs_gost_forwarding={needs_gost_forwarding}, needs_rathole_server={needs_rathole_server}")
                 
                 # Force log output - use print as well to ensure we see it
                 log_msg = f"Tunnel {db_tunnel.id}: needs_gost_forwarding={needs_gost_forwarding}, needs_rathole_server={needs_rathole_server}, type={db_tunnel.type}, core={db_tunnel.core}"
@@ -139,6 +143,7 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 debug_print(f"DEBUG: About to check if needs_gost_forwarding (value: {needs_gost_forwarding}, type: {type(needs_gost_forwarding)})")
                 debug_print(f"DEBUG: needs_gost_forwarding == True? {needs_gost_forwarding == True}")
                 debug_print(f"DEBUG: needs_gost_forwarding is True? {needs_gost_forwarding is True}")
+                debug_print(f"DEBUG: bool(needs_gost_forwarding)? {bool(needs_gost_forwarding)}")
                 
                 if needs_gost_forwarding:
                     debug_print(f"DEBUG: INSIDE if needs_gost_forwarding block!")
