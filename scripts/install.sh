@@ -178,6 +178,73 @@ progress "Configuration saved"
 mkdir -p panel/data panel/certs
 progress "Directories created"
 
+# Apply network optimizations for stable tunnels
+echo ""
+echo "Applying network optimizations..."
+if [ -f "/etc/sysctl.conf" ]; then
+    # Backup original sysctl.conf
+    if [ ! -f "/etc/sysctl.conf.smite-backup" ]; then
+        cp /etc/sysctl.conf /etc/sysctl.conf.smite-backup
+    fi
+    
+    # Add network optimizations if not already present
+    if ! grep -q "# Smite Network Optimizations" /etc/sysctl.conf; then
+        cat >> /etc/sysctl.conf << 'EOF'
+
+# Smite Network Optimizations
+net.core.somaxconn = 65535
+net.core.netdev_max_backlog = 5000
+net.ipv4.tcp_max_syn_backlog = 8192
+net.ipv4.ip_local_port_range = 10000 65535
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_fin_timeout = 30
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_keepalive_intvl = 60
+net.ipv4.tcp_keepalive_probes = 3
+net.ipv4.tcp_slow_start_after_idle = 0
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+net.ipv4.udp_mem = 3145728 4194304 16777216
+net.ipv4.ip_forward = 1
+EOF
+        # Apply optimizations
+        sysctl -p > /dev/null 2>&1 || true
+        progress "Network optimizations applied"
+    else
+        progress "Network optimizations already applied"
+    fi
+fi
+
+# Increase file descriptor limits
+if [ -f "/etc/security/limits.conf" ]; then
+    if ! grep -q "# Smite File Descriptor Limits" /etc/security/limits.conf; then
+        cat >> /etc/security/limits.conf << 'EOF'
+
+# Smite File Descriptor Limits
+* soft nofile 65535
+* hard nofile 65535
+root soft nofile 65535
+root hard nofile 65535
+EOF
+        progress "File descriptor limits increased"
+    fi
+    # Apply for current session
+    ulimit -n 65535 2>/dev/null || true
+fi
+
+# Enable BBR congestion control (if available)
+if modprobe -n tcp_bbr 2>/dev/null; then
+    if ! grep -q "tcp_bbr" /etc/modules-load.d/*.conf 2>/dev/null && ! grep -q "tcp_bbr" /etc/modules 2>/dev/null; then
+        echo "tcp_bbr" | tee -a /etc/modules-load.d/smite.conf > /dev/null 2>&1 || echo "tcp_bbr" >> /etc/modules 2>/dev/null || true
+        modprobe tcp_bbr 2>/dev/null || true
+        sysctl -w net.ipv4.tcp_congestion_control=bbr > /dev/null 2>&1 || true
+        sysctl -w net.core.default_qdisc=fq > /dev/null 2>&1 || true
+        progress "BBR congestion control enabled"
+    fi
+fi
+
 # Generate CA certificate placeholder if not exists
 if [ ! -f "panel/certs/ca.crt" ]; then
     touch panel/certs/ca.crt panel/certs/ca.key
