@@ -24,7 +24,7 @@ async def get_ca_cert(download: bool = False):
         base_dir = Path(os.getcwd())
         cert_path = base_dir / cert_path
     
-    print(f"Looking for certificate at: {cert_path} (exists: {cert_path.exists()})")
+    logger.debug(f"Looking for certificate at: {cert_path} (exists: {cert_path.exists()})")
     
     # Ensure parent directory exists
     cert_path.parent.mkdir(parents=True, exist_ok=True)
@@ -33,10 +33,10 @@ async def get_ca_cert(download: bool = False):
     needs_generation = False
     if not cert_path.exists():
         needs_generation = True
-        print(f"CA certificate missing at {cert_path}, generating...")
+        logger.info(f"CA certificate missing at {cert_path}, generating...")
     elif cert_path.stat().st_size == 0:
         needs_generation = True
-        print(f"CA certificate is empty (0 bytes) at {cert_path}, deleting and regenerating...")
+        logger.info(f"CA certificate is empty (0 bytes) at {cert_path}, deleting and regenerating...")
         # Delete empty file
         try:
             cert_path.unlink()
@@ -49,7 +49,7 @@ async def get_ca_cert(download: bool = False):
         h2_server.cert_path = str(cert_path)
         h2_server.key_path = str(cert_path.parent / "ca.key")
         await h2_server._generate_certs()
-        print(f"Certificate generated at {cert_path}")
+        logger.info(f"Certificate generated at {cert_path}")
     
     if not cert_path.exists():
         raise HTTPException(status_code=500, detail=f"Failed to generate CA certificate at {cert_path}")
@@ -57,11 +57,11 @@ async def get_ca_cert(download: bool = False):
     # Check if file is empty
     try:
         cert_content = cert_path.read_text()
-        print(f"Certificate file size: {len(cert_content)} bytes")
+        logger.debug(f"Certificate file size: {len(cert_content)} bytes")
         if not cert_content or not cert_content.strip():
             raise HTTPException(status_code=500, detail="CA certificate is empty after generation")
     except Exception as e:
-        print(f"Error reading certificate: {str(e)}")
+        logger.error(f"Error reading certificate: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to read certificate: {str(e)}")
     
     # If download parameter is true, return as file download

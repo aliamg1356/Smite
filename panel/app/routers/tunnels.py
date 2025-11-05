@@ -16,11 +16,6 @@ from app.hysteria2_client import Hysteria2Client
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Use stderr for immediate output (not buffered)
-def debug_print(msg):
-    print(msg, file=sys.stderr, flush=True)
-    logger.info(msg)
-
 
 class TunnelCreate(BaseModel):
     name: str
@@ -57,15 +52,13 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
     """Create a new tunnel and auto-apply it"""
     from app.hysteria2_client import Hysteria2Client
     
-    debug_print(f"DEBUG: create_tunnel called - name={tunnel.name}, type={tunnel.type}, core={tunnel.core}, node_id={tunnel.node_id}")
+    logger.info(f"Creating tunnel: name={tunnel.name}, type={tunnel.type}, core={tunnel.core}, node_id={tunnel.node_id}")
     
     # Verify node exists
     result = await db.execute(select(Node).where(Node.id == tunnel.node_id))
     node = result.scalar_one_or_none()
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
-    
-    debug_print(f"DEBUG: Node found: {node.id}, metadata: {node.node_metadata}")
     
     # Create tunnel
     db_tunnel = Tunnel(
@@ -83,20 +76,17 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
     # Auto-apply tunnel immediately
     # Only send to node for rathole tunnels - gost tunnels forward directly without node
     try:
-        debug_print(f"DEBUG: Starting tunnel apply for tunnel {db_tunnel.id}")
-        
         # Only apply to node for rathole tunnels
         needs_node_apply = db_tunnel.core == "rathole"
         
         if needs_node_apply:
-            debug_print(f"DEBUG: Tunnel {db_tunnel.id} needs node apply (rathole)")
             client = Hysteria2Client()
             # Update node metadata with API address if not set
             if not node.node_metadata.get("api_address"):
                 node.node_metadata["api_address"] = f"http://{node.node_metadata.get('ip_address', node.fingerprint)}:{node.node_metadata.get('api_port', 8888)}"
                 await db.commit()
             
-            debug_print(f"DEBUG: Sending tunnel apply to node {node.id}")
+            logger.info(f"Applying tunnel {db_tunnel.id} to node {node.id}")
             response = await client.send_to_node(
                 node_id=node.id,
                 endpoint="/api/agent/tunnels/apply",
@@ -108,14 +98,12 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 }
             )
             
-            # Debug: Print response
-            debug_print(f"DEBUG: Node response for tunnel {db_tunnel.id}: {response}")
-            
             # Check if node returned an error
             if response.get("status") == "error":
                 db_tunnel.status = "error"
                 error_msg = response.get("message", "Unknown error from node")
                 db_tunnel.error_message = f"Node error: {error_msg}"
+                logger.error(f"Tunnel {db_tunnel.id}: {error_msg}")
                 await db.commit()
                 await db.refresh(db_tunnel)
                 return db_tunnel
@@ -123,46 +111,26 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
             if response.get("status") != "success":
                 db_tunnel.status = "error"
                 db_tunnel.error_message = "Failed to apply tunnel to node. Check node connection."
+                logger.error(f"Tunnel {db_tunnel.id}: Failed to apply to node")
                 await db.commit()
                 await db.refresh(db_tunnel)
                 return db_tunnel
         
         # Mark as active (for both gost and rathole)
-        debug_print(f"DEBUG: Tunnel {db_tunnel.id} applied successfully")
         db_tunnel.status = "active"
         
-        debug_print("DEBUG: About to enter try block for forwarding setup")
         try:
-            debug_print("DEBUG: Inside try block for forwarding setup")
             # Start forwarding on panel using gost (for TCP/UDP/WS/gRPC/tcpmux tunnels)
             # Rathole: reverse tunnel, needs Rathole server on panel
             needs_gost_forwarding = db_tunnel.type in ["tcp", "udp", "ws", "grpc", "tcpmux"] and db_tunnel.core == "xray"
             needs_rathole_server = db_tunnel.core == "rathole"
             
-            debug_print(f"DEBUG: Calculated needs_gost_forwarding={needs_gost_forwarding}, needs_rathole_server={needs_rathole_server}")
-            
-            # Force log output - use print as well to ensure we see it
-            log_msg = f"Tunnel {db_tunnel.id}: needs_gost_forwarding={needs_gost_forwarding}, needs_rathole_server={needs_rathole_server}, type={db_tunnel.type}, core={db_tunnel.core}"
-            debug_print(log_msg)
-            debug_print(f"DEBUG: About to check if needs_gost_forwarding (value: {needs_gost_forwarding}, type: {type(needs_gost_forwarding)})")
-            debug_print(f"DEBUG: needs_gost_forwarding == True? {needs_gost_forwarding == True}")
-            debug_print(f"DEBUG: needs_gost_forwarding is True? {needs_gost_forwarding is True}")
-            debug_print(f"DEBUG: bool(needs_gost_forwarding)? {bool(needs_gost_forwarding)}")
-            
             if needs_gost_forwarding:
-                debug_print(f"DEBUG: INSIDE if needs_gost_forwarding block!")
-                debug_print(f"DEBUG: Entering gost forwarding block for tunnel {db_tunnel.id}")
-                # panel_port: port on panel where gost listens (remote_port from spec)
-                # forward_to: target address:port to forward to (e.g., "127.0.0.1:9999")
                 panel_port = db_tunnel.spec.get("remote_port") or db_tunnel.spec.get("listen_port")
                 forward_to = db_tunnel.spec.get("forward_to")
-                debug_print(f"DEBUG: Tunnel {db_tunnel.id}: panel_port={panel_port}, forward_to={forward_to}, spec={db_tunnel.spec}")
-                debug_print(f"DEBUG: Tunnel {db_tunnel.id}: has gost_forwarder={hasattr(request.app.state, 'gost_forwarder')}")
+                
                 if panel_port and forward_to and hasattr(request.app.state, 'gost_forwarder'):
-                    debug_print(f"DEBUG: Conditions met - will start gost forwarding directly to target")
                     try:
-                        # Use gost for forwarding: listen on panel_port, forward directly to forward_to
-                        debug_print(f"DEBUG: About to call start_forward() with: tunnel_id={db_tunnel.id}, local_port={panel_port}, forward_to={forward_to}, tunnel_type={db_tunnel.type}")
                         logger.info(f"Starting gost forwarding for tunnel {db_tunnel.id}: {db_tunnel.type}://:{panel_port} -> {forward_to}")
                         request.app.state.gost_forwarder.start_forward(
                             tunnel_id=db_tunnel.id,
@@ -170,12 +138,8 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                             forward_to=forward_to,
                             tunnel_type=db_tunnel.type
                         )
-                        debug_print(f"DEBUG: start_forward() returned successfully")
                         logger.info(f"Successfully started gost forwarding for tunnel {db_tunnel.id}")
                     except Exception as e:
-                        debug_print(f"DEBUG: Exception in start_forward(): {e}")
-                        import traceback
-                        debug_print(f"DEBUG: Traceback: {traceback.format_exc()}")
                         error_msg = str(e)
                         logger.error(f"Failed to start gost forwarding for tunnel {db_tunnel.id}: {error_msg}", exc_info=True)
                         db_tunnel.status = "error"
@@ -189,7 +153,6 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     if not hasattr(request.app.state, 'gost_forwarder'):
                         missing.append("gost_forwarder")
                     logger.warning(f"Tunnel {db_tunnel.id}: Missing required fields: {missing}")
-                    debug_print(f"DEBUG: Missing: {missing}, panel_port={panel_port}, forward_to={forward_to}")
                     if not forward_to:
                         error_msg = "forward_to is required for gost tunnels"
                         db_tunnel.status = "error"
@@ -232,14 +195,12 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                         db_tunnel.error_message = f"Rathole server error: {error_msg}"
             except Exception as e:
                 # Catch any exception in the forwarding setup
-                debug_print(f"ERROR: Exception in forwarding setup: {e}")
                 logger.error(f"Exception in forwarding setup for tunnel {db_tunnel.id}: {e}", exc_info=True)
-        # Error handling done above for node apply
+        
         await db.commit()
         await db.refresh(db_tunnel)
     except Exception as e:
         # Don't fail tunnel creation if apply fails, just mark as error
-        debug_print(f"ERROR: Exception in tunnel creation: {e}")
         logger.error(f"Exception in tunnel creation for {db_tunnel.id}: {e}", exc_info=True)
         error_msg = str(e)
         db_tunnel.status = "error"

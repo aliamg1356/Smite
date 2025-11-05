@@ -97,7 +97,7 @@ bind_addr = "0.0.0.0:{proxy_port}"
                     del self.server_configs[tunnel_id]
                 raise RuntimeError(error_msg)
             
-            logger.info(f"✅ Started Rathole server for tunnel {tunnel_id} on {bind_addr}, proxy port: {proxy_port}")
+            logger.info(f"Started Rathole server for tunnel {tunnel_id} on {bind_addr}, proxy port: {proxy_port}")
             return True
             
         except Exception as e:

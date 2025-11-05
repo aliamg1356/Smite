@@ -102,17 +102,17 @@ class Hysteria2Client:
                 data = response.json()
                 self.node_id = data.get("id")
                 self.registered = True
-                print(f"✅ Node registered successfully with ID: {self.node_id}")
+                logger.info(f"Node registered successfully with ID: {self.node_id}")
                 return True
             else:
-                print(f"❌ Registration failed: {response.status_code} - {response.text}")
+                logger.error(f"Registration failed: {response.status_code} - {response.text}")
                 return False
         except httpx.ConnectError as e:
-            print(f"❌ Cannot connect to panel at {panel_api_url}: {str(e)}")
+            logger.error(f"Cannot connect to panel at {panel_api_url}: {str(e)}")
             print(f"   Make sure panel is running and accessible")
             return False
         except Exception as e:
-            print(f"❌ Registration error: {str(e)}")
+            logger.error(f"Registration error: {str(e)}")
             return False
     
     async def _generate_fingerprint(self):

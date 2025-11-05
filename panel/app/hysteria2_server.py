@@ -27,7 +27,7 @@ class Hysteria2Server:
             await self._generate_certs()
         
         # Start server (simplified - actual Hysteria2 integration would use their library)
-        print(f"Hysteria2 server starting on port {self.port}")
+        logger.info(f"Hysteria2 server starting on port {self.port}")
         # TODO: Integrate with actual Hysteria2 library
     
     async def stop(self):
@@ -56,8 +56,8 @@ class Hysteria2Server:
             cert_path = base_dir / cert_path
             key_path = base_dir / key_path
         
-        print(f"Generating certificate at: {cert_path}")
-        print(f"Generating key at: {key_path}")
+        logger.info(f"Generating certificate at: {cert_path}")
+        logger.info(f"Generating key at: {key_path}")
         
         # Create directories
         cert_path.parent.mkdir(parents=True, exist_ok=True)
@@ -102,15 +102,14 @@ class Hysteria2Server:
         # Write certificate
         try:
             cert_bytes = cert.public_bytes(serialization.Encoding.PEM)
-            print(f"Writing {len(cert_bytes)} bytes to {cert_path}")
             with open(cert_path, "wb") as f:
                 f.write(cert_bytes)
             # Verify write
             if cert_path.stat().st_size == 0:
                 raise IOError(f"Certificate file is empty after write: {cert_path}")
-            print(f"✅ Certificate written successfully ({cert_path.stat().st_size} bytes)")
+            logger.info(f"Certificate written successfully ({cert_path.stat().st_size} bytes)")
         except Exception as e:
-            print(f"❌ Error writing certificate: {e}")
+            logger.error(f"Error writing certificate: {e}")
             raise
         
         # Write private key
@@ -120,20 +119,19 @@ class Hysteria2Server:
                 format=serialization.PrivateFormat.PKCS8,
                 encryption_algorithm=serialization.NoEncryption()
             )
-            print(f"Writing {len(key_bytes)} bytes to {key_path}")
             with open(key_path, "wb") as f:
                 f.write(key_bytes)
             # Verify write
             if key_path.stat().st_size == 0:
                 raise IOError(f"Key file is empty after write: {key_path}")
-            print(f"✅ Key written successfully ({key_path.stat().st_size} bytes)")
+            logger.info(f"Key written successfully ({key_path.stat().st_size} bytes)")
         except Exception as e:
-            print(f"❌ Error writing key: {e}")
+            logger.error(f"Error writing key: {e}")
             raise
         
         # Update paths in instance
         self.cert_path = str(cert_path)
         self.key_path = str(key_path)
         
-        print(f"✅ Generated CA certificate at {cert_path}")
+        logger.info(f"Generated CA certificate at {cert_path}")
 

@@ -71,10 +71,10 @@ class PortForwarder:
                     reuse_address=True,
                     reuse_port=False
                 )
-                logger.info(f"✅ Forwarding server started on 0.0.0.0:{local_port} -> {node_host}:{remote_port}")
+                logger.info(f"Forwarding server started on 0.0.0.0:{local_port} -> {node_host}:{remote_port}")
             except OSError as e:
                 if "Address already in use" in str(e) or e.errno == 98:
-                    logger.error(f"❌ Port {local_port} is already in use. Please ensure:")
+                    logger.error(f"Port {local_port} is already in use. Please ensure:")
                     logger.error(f"   1. The panel container is in host network mode, OR")
                     logger.error(f"   2. Port {local_port} is exposed in docker-compose.yml, OR")
                     logger.error(f"   3. No other service is using port {local_port}")

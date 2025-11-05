@@ -30,9 +30,6 @@ class GostForwarder:
         Returns:
             True if started successfully
         """
-        import sys
-        debug_print = lambda msg: print(f"GOST_FORWARDER: {msg}", file=sys.stderr, flush=True)
-        debug_print(f"start_forward called: tunnel_id={tunnel_id}, local_port={local_port}, forward_to={forward_to}, tunnel_type={tunnel_type}")
         try:
             # Stop existing forward if any
             if tunnel_id in self.active_forwards:
@@ -84,32 +81,26 @@ class GostForwarder:
             # Check if gost binary exists
             gost_binary = "/usr/local/bin/gost"
             import os
-            debug_print(f"Checking for gost binary at {gost_binary}...")
             if not os.path.exists(gost_binary):
-                debug_print(f"gost not found at {gost_binary}, checking PATH...")
                 # Try system gost
                 import shutil
                 gost_binary = shutil.which("gost")
                 if not gost_binary:
                     error_msg = "gost binary not found at /usr/local/bin/gost or in PATH"
-                    debug_print(f"ERROR: {error_msg}")
+                    logger.error(error_msg)
                     raise RuntimeError(error_msg)
-                debug_print(f"Found gost at {gost_binary}")
             else:
-                debug_print(f"Found gost at {gost_binary}")
                 # Check if executable
                 if not os.access(gost_binary, os.X_OK):
                     error_msg = f"gost binary at {gost_binary} is not executable"
-                    debug_print(f"ERROR: {error_msg}")
+                    logger.error(error_msg)
                     raise RuntimeError(error_msg)
             
             cmd[0] = gost_binary
-            debug_print(f"Command to execute: {' '.join(cmd)}")
-            logger.info(f"Starting gost with command: {' '.join(cmd)}")
+            logger.info(f"Starting gost: {' '.join(cmd)}")
             
             # Start gost process
             try:
-                debug_print(f"About to start subprocess.Popen with cmd={cmd}")
                 # Use log file for debugging (keep file open for subprocess)
                 log_file = self.config_dir / f"gost_{tunnel_id}.log"
                 # Ensure directory exists
@@ -131,48 +122,33 @@ class GostForwarder:
                 log_f.flush()
                 # Store file handle so we can close it later
                 self.active_forwards[f"{tunnel_id}_log"] = log_f
-                debug_print(f"subprocess.Popen returned, PID={proc.pid}")
-                logger.info(f"Started gost process for tunnel {tunnel_id}, PID={proc.pid}, log file: {log_file}")
-                # Verify log file was created
-                if log_file.exists():
-                    debug_print(f"Log file created: {log_file}")
-                else:
-                    debug_print(f"Warning: Log file not found at {log_file}")
+                logger.info(f"Started gost process for tunnel {tunnel_id}, PID={proc.pid}")
             except Exception as e:
                 error_msg = f"Failed to start gost process: {e}"
-                debug_print(f"ERROR in subprocess.Popen: {error_msg}")
                 logger.error(error_msg, exc_info=True)
                 raise RuntimeError(error_msg)
             
             # Wait a moment to check if process started successfully
-            debug_print(f"Waiting 1s to check if process is still alive...")
             time.sleep(1.0)
             poll_result = proc.poll()
-            debug_print(f"Process poll result: {poll_result} (None means still running)")
             if poll_result is not None:
                 # Process died immediately
-                debug_print(f"Process died immediately, exit code: {poll_result}")
                 try:
                     # Read from log file
                     if log_file.exists():
                         with open(log_file, 'r') as f:
-                            log_content = f.read()
-                            debug_print(f"Log file content: {log_content}")
-                            stderr = log_content
+                            stderr = f.read()
                     else:
                         stderr = "Log file not found"
                     stdout = ""
                 except Exception as e:
                     stderr = f"Could not read log file: {e}"
                     stdout = ""
-                    debug_print(f"Exception reading log file: {e}")
                 error_msg = f"gost failed to start (exit code: {poll_result}): {stderr or stdout or 'Unknown error'}"
-                debug_print(f"ERROR: {error_msg}")
                 logger.error(error_msg)
                 raise RuntimeError(error_msg)
             
             # Verify port is actually listening (check after a short delay)
-            debug_print(f"Waiting 0.5s more, then checking if port {local_port} is listening...")
             time.sleep(0.5)
             import socket
             try:
@@ -180,33 +156,22 @@ class GostForwarder:
                 sock.settimeout(1)
                 result = sock.connect_ex(('127.0.0.1', local_port))
                 sock.close()
-                if result == 0:
-                    debug_print(f"✅ Port {local_port} is listening!")
-                else:
-                    debug_print(f"⚠️ Warning: Port {local_port} is NOT listening (connection result: {result})")
-                    # Don't fail, but log warning - port might be in use or process might be starting
+                if result != 0:
                     logger.warning(f"Port {local_port} not listening after gost start, but process is running. PID: {proc.pid}")
             except Exception as e:
-                debug_print(f"Exception checking port: {e}")
                 logger.warning(f"Could not verify port {local_port} is listening: {e}")
             
             self.active_forwards[tunnel_id] = proc
             self.forward_configs[tunnel_id] = {
                 "local_port": local_port,
-                "node_address": node_address,
-                "remote_port": remote_port,
+                "forward_to": forward_to,
                 "tunnel_type": tunnel_type
             }
             
-            debug_print(f"✅ Successfully started gost forwarding, PID={proc.pid}")
-            logger.info(f"✅ Started gost forwarding for tunnel {tunnel_id}: {tunnel_type}://:{local_port} -> {node_address}:{remote_port}")
-            logger.info(f"Gost process PID: {proc.pid}")
+            logger.info(f"Started gost forwarding for tunnel {tunnel_id}: {tunnel_type}://:{local_port} -> {forward_to}, PID={proc.pid}")
             return True
             
         except Exception as e:
-            import traceback
-            debug_print(f"EXCEPTION in start_forward: {e}")
-            debug_print(f"Traceback: {traceback.format_exc()}")
             logger.error(f"Failed to start gost forwarding for tunnel {tunnel_id}: {e}")
             raise
     

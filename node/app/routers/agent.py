@@ -9,22 +9,6 @@ import sys
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Add middleware to log all requests
-class LoggingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        if request.url.path == "/api/agent/tunnels/apply":
-            print(f"🔵 MIDDLEWARE: {request.method} {request.url.path}", file=sys.stderr, flush=True)
-            # Read and cache body for logging
-            body = await request.body()
-            print(f"🔵 MIDDLEWARE: Body: {body.decode()}", file=sys.stderr, flush=True)
-            # Recreate request with cached body
-            async def receive():
-                return {"type": "http.request", "body": body}
-            request._receive = receive
-        response = await call_next(request)
-        if request.url.path == "/api/agent/tunnels/apply":
-            print(f"🔵 MIDDLEWARE: Response status: {response.status_code}", file=sys.stderr, flush=True)
-        return response
 
 
 class TunnelApply(BaseModel):
@@ -46,29 +30,19 @@ class UsagePush(BaseModel):
 @router.post("/tunnels/apply")
 async def apply_tunnel(data: TunnelApply, request: Request):
     """Apply tunnel configuration"""
-    import logging
-    import sys
     logger = logging.getLogger(__name__)
     adapter_manager = request.app.state.adapter_manager
     
-    # Use print for immediate output (not buffered)
-    print(f"🔵 NODE: Received tunnel apply request: tunnel_id={data.tunnel_id}, type={data.type}, spec={data.spec}", file=sys.stderr, flush=True)
-    logger.info(f"Received tunnel apply request: tunnel_id={data.tunnel_id}, type={data.type}, spec={data.spec}")
+    logger.info(f"Applying tunnel {data.tunnel_id}: type={data.type}")
     try:
-        print(f"🔵 NODE: Calling adapter_manager.apply_tunnel...", file=sys.stderr, flush=True)
         await adapter_manager.apply_tunnel(
             tunnel_id=data.tunnel_id,
             tunnel_type=data.type,
             spec=data.spec
         )
-        print(f"✅ NODE: Tunnel {data.tunnel_id} applied successfully", file=sys.stderr, flush=True)
         logger.info(f"Tunnel {data.tunnel_id} applied successfully")
         return {"status": "success", "message": "Tunnel applied"}
     except Exception as e:
-        import traceback
-        error_msg = f"❌ NODE: Failed to apply tunnel {data.tunnel_id}: {e}"
-        print(error_msg, file=sys.stderr, flush=True)
-        print(f"❌ NODE: Traceback: {traceback.format_exc()}", file=sys.stderr, flush=True)
         logger.error(f"Failed to apply tunnel {data.tunnel_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
