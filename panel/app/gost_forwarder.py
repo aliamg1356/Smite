@@ -68,19 +68,19 @@ class GostForwarder:
             elif tunnel_type == "ws":
                 # WebSocket forwarding: listen as WS, forward to TCP
                 # For VLESS over WS, the client connects via WebSocket, but target is TCP
-                # Use chain syntax: -L=ws://host:port/tcp://host:port
-                # For VLESS over WS, the path is typically /, which is the default
+                # Use separate -L and -F flags for WebSocket forwarding
                 if ":" in forward_to:
                     forward_host, forward_port = forward_to.rsplit(":", 1)
                 else:
                     forward_host = forward_to
                     forward_port = "8080"
-                # WebSocket on listen side, TCP on forward side
-                # Syntax: ws://listen/tcp://target (path defaults to /)
-                # Note: gost WebSocket forwarding uses ws://host:port/tcp://target format
+                # WebSocket on listen side with path, TCP on forward side
+                # Use -L for WebSocket listener with path, -F for TCP forwarder
+                # Path is / for VLESS over WS
                 cmd = [
                     "/usr/local/bin/gost",
-                    f"-L=ws://0.0.0.0:{local_port}/tcp://{forward_host}:{forward_port}"
+                    "-L=ws://0.0.0.0:{}?path=/".format(local_port),
+                    "-F=tcp://{}:{}".format(forward_host, forward_port)
                 ]
             elif tunnel_type == "grpc":
                 # gRPC forwarding using chain syntax: -L=grpc://:port/host:port
@@ -199,25 +199,52 @@ class GostForwarder:
                         sock.close()
                         port_listening = (result == 0)
                         
-                    if not port_listening:
-                        # Process might have died after initial check
-                        poll_result = proc.poll()
-                        if poll_result is not None:
-                            error_msg = f"gost process died after startup (exit code: {poll_result})"
+                    # Check if process is still alive
+                    poll_result = proc.poll()
+                    if poll_result is not None:
+                        # Process died - try to read error from log
+                        try:
+                            if log_file.exists():
+                                with open(log_file, 'r') as f:
+                                    error_output = f.read()
+                                error_msg = f"gost process died after startup (exit code: {poll_result}): {error_output[-500:] if len(error_output) > 500 else error_output}"
+                            else:
+                                error_msg = f"gost process died after startup (exit code: {poll_result}), log file not found"
                             logger.error(error_msg)
                             raise RuntimeError(error_msg)
-                        else:
-                            logger.warning(f"Port {local_port} not listening after gost start, but process is running. PID: {proc.pid}")
+                        except Exception as e:
+                            error_msg = f"gost process died after startup (exit code: {poll_result}), could not read error: {e}"
+                            logger.error(error_msg)
+                            raise RuntimeError(error_msg)
+                    elif not port_listening:
+                        logger.warning(f"Port {local_port} not listening after gost start, but process is running. PID: {proc.pid}")
                 except Exception as e:
                     logger.warning(f"Could not verify port {local_port} is listening: {e}")
+                    # Still check if process is alive
+                    poll_result = proc.poll()
+                    if poll_result is not None:
+                        error_msg = f"gost process died during port check (exit code: {poll_result})"
+                        logger.error(error_msg)
+                        raise RuntimeError(error_msg)
             else:
                 # For UDP, just verify process is running
                 time.sleep(0.5)
                 poll_result = proc.poll()
                 if poll_result is not None:
-                    error_msg = f"gost UDP process died after startup (exit code: {poll_result})"
-                    logger.error(error_msg)
-                    raise RuntimeError(error_msg)
+                    # Try to read error from log
+                    try:
+                        if log_file.exists():
+                            with open(log_file, 'r') as f:
+                                error_output = f.read()
+                            error_msg = f"gost UDP process died after startup (exit code: {poll_result}): {error_output[-500:] if len(error_output) > 500 else error_output}"
+                        else:
+                            error_msg = f"gost UDP process died after startup (exit code: {poll_result}), log file not found"
+                        logger.error(error_msg)
+                        raise RuntimeError(error_msg)
+                    except Exception as e:
+                        error_msg = f"gost UDP process died after startup (exit code: {poll_result}), could not read error: {e}"
+                        logger.error(error_msg)
+                        raise RuntimeError(error_msg)
             
             self.active_forwards[tunnel_id] = proc
             self.forward_configs[tunnel_id] = {
