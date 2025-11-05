@@ -13,9 +13,14 @@ logger = logging.getLogger(__name__)
 class LoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         if request.url.path == "/api/agent/tunnels/apply":
-            body = await request.body()
             print(f"🔵 MIDDLEWARE: {request.method} {request.url.path}", file=sys.stderr, flush=True)
-            print(f"🔵 MIDDLEWARE: Body: {body}", file=sys.stderr, flush=True)
+            # Read and cache body for logging
+            body = await request.body()
+            print(f"🔵 MIDDLEWARE: Body: {body.decode()}", file=sys.stderr, flush=True)
+            # Recreate request with cached body
+            async def receive():
+                return {"type": "http.request", "body": body}
+            request._receive = receive
         response = await call_next(request)
         if request.url.path == "/api/agent/tunnels/apply":
             print(f"🔵 MIDDLEWARE: Response status: {response.status_code}", file=sys.stderr, flush=True)
