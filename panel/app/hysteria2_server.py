@@ -1,9 +1,12 @@
 """Hysteria2 server for panel-node communication"""
 import asyncio
 import ssl
+import logging
 from pathlib import Path
 from typing import Optional
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class Hysteria2Server:
