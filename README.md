@@ -1,7 +1,11 @@
 # Smite - Tunneling Control Panel
 
 <div align="center">
-  <img src="assets/SmiteD.png" alt="Smite Logo" width="200"/>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/SmiteD.png"/>
+    <source media="(prefers-color-scheme: light)" srcset="assets/SmiteL.png"/>
+    <img src="assets/SmiteL.png" alt="Smite Logo" width="200"/>
+  </picture>
   
   **Modern tunnel management built on GOST and Rathole, featuring an intuitive WebUI, fast CLI, and open-source freedom.**
   
