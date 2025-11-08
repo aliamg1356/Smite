@@ -9,89 +9,60 @@ RUN apt-get update && apt-get install -y \
 
 # Stage 2: Install rathole and gost (cached layer)
 FROM base AS binaries
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; \
-    elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; \
-    else ARCH="amd64"; fi && \
-    echo "Getting latest rathole version..." && \
-    RATHOLE_VERSION=$(curl -sL https://api.github.com/repos/rapiz1/rathole/releases | jq -r '.[0].tag_name // "v0.5.0"') && \
-    echo "Downloading rathole ${RATHOLE_VERSION} for ${ARCH}..." && \
-    RATHOLE_ARCH=$(if [ "$ARCH" = "amd64" ]; then echo "x86_64"; elif [ "$ARCH" = "arm64" ]; then echo "aarch64"; else echo "x86_64"; fi) && \
-    RATHOLE_ASSET=$(curl -sL "https://api.github.com/repos/rapiz1/rathole/releases" | jq -r --arg arch "$RATHOLE_ARCH" '.[0].assets[] | select(.name | contains($arch) and (contains("linux-gnu") or contains("linux-musl"))) | .browser_download_url' | head -1) && \
-    if [ -z "$RATHOLE_ASSET" ] || [ "$RATHOLE_ASSET" = "null" ]; then \
-        echo "Error: Could not find rathole binary for ${ARCH}"; \
+RUN set -eux; \
+    ARCH_RAW="$(uname -m)"; \
+    case "$ARCH_RAW" in \
+        x86_64) ARCH="amd64"; RATHOLE_ARCH="x86_64" ;; \
+        aarch64) ARCH="arm64"; RATHOLE_ARCH="aarch64" ;; \
+        *) ARCH="amd64"; RATHOLE_ARCH="x86_64" ;; \
+    esac; \
+    echo "Fetching rathole for $ARCH_RAW"; \
+    RATHOLE_JSON="$(curl -fsSL https://api.github.com/repos/rapiz1/rathole/releases/latest)"; \
+    RATHOLE_URL="$(printf '%s' "$RATHOLE_JSON" | jq -r --arg arch "$RATHOLE_ARCH" '.assets[] | select(.name | test($arch) and test("linux")) | .browser_download_url' | head -n1)"; \
+    if [ -z "$RATHOLE_URL" ] || [ "$RATHOLE_URL" = "null" ]; then \
+        echo "Unable to find rathole release for arch=$ARCH_RAW"; \
         exit 1; \
-    fi && \
-    echo "Downloading from: $RATHOLE_ASSET" && \
-    if echo "$RATHOLE_ASSET" | grep -q "\.zip$"; then \
-        curl -L "$RATHOLE_ASSET" -o /tmp/rathole.zip -f && \
-        unzip -q /tmp/rathole.zip -d /tmp && \
-        rm /tmp/rathole.zip; \
-    else \
-        curl -L "$RATHOLE_ASSET" -o /tmp/rathole.tar.gz -f && \
-        tar -xzf /tmp/rathole.tar.gz -C /tmp && \
-        rm /tmp/rathole.tar.gz; \
-    fi && \
-    find /tmp -name "rathole" -type f -executable -exec mv {} /usr/local/bin/rathole \; && \
-    chmod +x /usr/local/bin/rathole && \
-    rm -rf /tmp/rathole* && \
-    rathole --version || echo "Rathole installed" && \
-    echo "Getting latest gost version..." && \
-    GOST_VERSION=$(curl -sL https://api.github.com/repos/ginuerzh/gost/releases | jq -r '.[0].tag_name // "v2.11.5"') && \
-    echo "Downloading gost ${GOST_VERSION} for ${ARCH}..." && \
-    # Query GitHub API for the correct asset URL
-    GOST_ASSET=$(curl -sL "https://api.github.com/repos/ginuerzh/gost/releases" | jq -r --arg arch "$ARCH" '.[0].assets[] | select(.name | contains("linux") and contains($arch)) | .browser_download_url' | head -1) && \
-    if [ -z "$GOST_ASSET" ] || [ "$GOST_ASSET" = "null" ]; then \
-        echo "Error: Could not find gost binary for ${ARCH}"; \
+    fi; \
+    RATHOLE_TMP="$(mktemp -d)"; \
+    curl -fsSL "$RATHOLE_URL" -o "$RATHOLE_TMP/asset"; \
+    case "$RATHOLE_URL" in \
+        *.tar.gz|*.tgz) tar -xzf "$RATHOLE_TMP/asset" -C "$RATHOLE_TMP" ;; \
+        *.zip) unzip -q "$RATHOLE_TMP/asset" -d "$RATHOLE_TMP" ;; \
+        *) mv "$RATHOLE_TMP/asset" "$RATHOLE_TMP/rathole-bin" ;; \
+    esac; \
+    RATHOLE_BIN="$(find "$RATHOLE_TMP" -type f -name 'rathole*' | head -n1)"; \
+    if [ -z "$RATHOLE_BIN" ]; then \
+        echo "Rathole binary missing after extracting $RATHOLE_URL"; \
+        ls -R "$RATHOLE_TMP"; \
         exit 1; \
-    fi && \
-    echo "Downloading from: $GOST_ASSET" && \
-    if ! curl -L "$GOST_ASSET" -o /tmp/gost-download -f; then \
-        echo "Error: Failed to download gost from $GOST_ASSET"; \
+    fi; \
+    install -Dm755 "$RATHOLE_BIN" /usr/local/bin/rathole; \
+    rm -rf "$RATHOLE_TMP"; \
+    /usr/local/bin/rathole --version || true; \
+    echo "Fetching gost for $ARCH_RAW"; \
+    GOST_JSON="$(curl -fsSL https://api.github.com/repos/ginuerzh/gost/releases/latest)"; \
+    GOST_URL="$(printf '%s' "$GOST_JSON" | jq -r --arg arch "$ARCH" '.assets[] | select(.name | test("linux-" + $arch)) | .browser_download_url' | head -n1)"; \
+    if [ -z "$GOST_URL" ] || [ "$GOST_URL" = "null" ]; then \
+        echo "Unable to find gost release for arch=$ARCH"; \
         exit 1; \
-    fi && \
-    if echo "$GOST_ASSET" | grep -q "\.gz$" && ! echo "$GOST_ASSET" | grep -q "\.tar\.gz"; then \
-        if ! gunzip /tmp/gost-download; then \
-            echo "Error: Failed to gunzip gost"; \
-            exit 1; \
-        fi && \
-        mv /tmp/gost-download /usr/local/bin/gost; \
-    elif echo "$GOST_ASSET" | grep -q "\.zip$"; then \
-        if ! unzip -q /tmp/gost-download -d /tmp; then \
-            echo "Error: Failed to unzip gost"; \
-            exit 1; \
-        fi && \
-        GOST_BIN=$(find /tmp -name "gost" -type f -executable | head -1) && \
-        if [ -z "$GOST_BIN" ]; then \
-            echo "Error: Could not find gost binary in archive"; \
-            exit 1; \
-        fi && \
-        mv "$GOST_BIN" /usr/local/bin/gost && \
-        rm -rf /tmp/gost* /tmp/gost-download; \
-    elif echo "$GOST_ASSET" | grep -q "\.tar\.gz$"; then \
-        mv /tmp/gost-download /tmp/gost.tar.gz && \
-        if ! tar -xzf /tmp/gost.tar.gz -C /tmp; then \
-            echo "Error: Failed to extract gost tar.gz"; \
-            exit 1; \
-        fi && \
-        GOST_BIN=$(find /tmp -name "gost" -type f -executable | head -1) && \
-        if [ -z "$GOST_BIN" ]; then \
-            echo "Error: Could not find gost binary in archive"; \
-            exit 1; \
-        fi && \
-        mv "$GOST_BIN" /usr/local/bin/gost && \
-        rm -rf /tmp/gost* /tmp/gost.tar.gz; \
-    else \
-        mv /tmp/gost-download /usr/local/bin/gost; \
-    fi && \
-    chmod +x /usr/local/bin/gost && \
-    rm -f /tmp/gost-download /tmp/gost.tar.gz && \
-    if [ ! -f /usr/local/bin/gost ]; then \
-        echo "Error: gost binary not found at /usr/local/bin/gost after installation"; \
+    fi; \
+    GOST_TMP="$(mktemp -d)"; \
+    curl -fsSL "$GOST_URL" -o "$GOST_TMP/asset"; \
+    case "$GOST_URL" in \
+        *.tar.gz|*.tgz) tar -xzf "$GOST_TMP/asset" -C "$GOST_TMP" ;; \
+        *.zip) unzip -q "$GOST_TMP/asset" -d "$GOST_TMP" ;; \
+        *.gz) gunzip -f "$GOST_TMP/asset" ;; \
+        *) mv "$GOST_TMP/asset" "$GOST_TMP/gost-bin" ;; \
+    esac; \
+    GOST_BIN="$(find "$GOST_TMP" -type f -name 'gost*' | head -n1)"; \
+    if [ -z "$GOST_BIN" ]; then \
+        echo "Gost binary missing after extracting $GOST_URL"; \
+        ls -R "$GOST_TMP"; \
         exit 1; \
-    fi && \
-    echo "Gost installed successfully at /usr/local/bin/gost" && \
-    /usr/local/bin/gost -V || echo "Gost version check skipped"
+    fi; \
+    install -Dm755 "$GOST_BIN" /usr/local/bin/gost; \
+    rm -rf "$GOST_TMP"; \
+    /usr/local/bin/gost -V || true
 
 # Stage 3: Install backhaul (cached layer)
 FROM base AS backhaul-bin

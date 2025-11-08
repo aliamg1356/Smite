@@ -10,32 +10,36 @@ RUN apt-get update && apt-get install -y \
 
 # Stage 2: Install rathole (cached layer)
 FROM base AS rathole-bin
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then ARCH="x86_64"; \
-    elif [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; \
-    else ARCH="x86_64"; fi && \
-    echo "Getting latest rathole version..." && \
-    RATHOLE_VERSION=$(curl -sL https://api.github.com/repos/rapiz1/rathole/releases | jq -r '.[0].tag_name // "v0.5.0"') && \
-    echo "Downloading rathole ${RATHOLE_VERSION} for ${ARCH}..." && \
-    RATHOLE_ASSET=$(curl -sL "https://api.github.com/repos/rapiz1/rathole/releases" | jq -r --arg arch "$ARCH" '.[0].assets[] | select(.name | contains($arch) and (contains("linux-gnu") or contains("linux-musl"))) | .browser_download_url' | head -1) && \
-    if [ -z "$RATHOLE_ASSET" ] || [ "$RATHOLE_ASSET" = "null" ]; then \
-        echo "Error: Could not find rathole binary for ${ARCH}"; \
+RUN set -eux; \
+    ARCH_RAW="$(uname -m)"; \
+    case "$ARCH_RAW" in \
+        x86_64) ARCH="x86_64" ;; \
+        aarch64) ARCH="aarch64" ;; \
+        *) ARCH="x86_64" ;; \
+    esac; \
+    echo "Fetching rathole for $ARCH_RAW"; \
+    RATHOLE_JSON="$(curl -fsSL https://api.github.com/repos/rapiz1/rathole/releases/latest)"; \
+    RATHOLE_URL="$(printf '%s' "$RATHOLE_JSON" | jq -r --arg arch "$ARCH" '.assets[] | select(.name | test($arch) and test("linux")) | .browser_download_url' | head -n1)"; \
+    if [ -z "$RATHOLE_URL" ] || [ "$RATHOLE_URL" = "null" ]; then \
+        echo "Unable to find rathole release for arch=$ARCH_RAW"; \
         exit 1; \
-    fi && \
-    echo "Downloading from: $RATHOLE_ASSET" && \
-    if echo "$RATHOLE_ASSET" | grep -q "\.zip$"; then \
-        curl -L "$RATHOLE_ASSET" -o /tmp/rathole.zip -f && \
-        unzip -q /tmp/rathole.zip -d /tmp && \
-        rm /tmp/rathole.zip; \
-    else \
-        curl -L "$RATHOLE_ASSET" -o /tmp/rathole.tar.gz -f && \
-        tar -xzf /tmp/rathole.tar.gz -C /tmp && \
-        rm /tmp/rathole.tar.gz; \
-    fi && \
-    find /tmp -name "rathole" -type f -executable -exec mv {} /usr/local/bin/ \; && \
-    chmod +x /usr/local/bin/rathole && \
-    rathole --version && \
-    rm -rf /tmp/rathole*
+    fi; \
+    RATHOLE_TMP="$(mktemp -d)"; \
+    curl -fsSL "$RATHOLE_URL" -o "$RATHOLE_TMP/asset"; \
+    case "$RATHOLE_URL" in \
+        *.tar.gz|*.tgz) tar -xzf "$RATHOLE_TMP/asset" -C "$RATHOLE_TMP" ;; \
+        *.zip) unzip -q "$RATHOLE_TMP/asset" -d "$RATHOLE_TMP" ;; \
+        *) mv "$RATHOLE_TMP/asset" "$RATHOLE_TMP/rathole-bin" ;; \
+    esac; \
+    RATHOLE_BIN="$(find "$RATHOLE_TMP" -type f -name 'rathole*' | head -n1)"; \
+    if [ -z "$RATHOLE_BIN" ]; then \
+        echo "Rathole binary missing after extracting $RATHOLE_URL"; \
+        ls -R "$RATHOLE_TMP"; \
+        exit 1; \
+    fi; \
+    install -Dm755 "$RATHOLE_BIN" /usr/local/bin/rathole; \
+    rm -rf "$RATHOLE_TMP"; \
+    /usr/local/bin/rathole --version || true
 
 # Stage 3: Install backhaul (cached layer)
 FROM base AS backhaul-bin
