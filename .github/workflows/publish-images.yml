@@ -43,9 +43,31 @@ jobs:
         run: |
           echo "prefix=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/smite" >> $GITHUB_OUTPUT
 
+      - name: Detect relevant changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            publish:
+              - '**'
+              - '!README.md'
+              - '!docs/**'
+
+      - name: Decide whether to publish
+        id: publish
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "result=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.changes.outputs.publish }}" = "true" ]; then
+            echo "result=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Extract metadata for panel image
         id: meta-panel
         uses: docker/metadata-action@v5
+        if: steps.publish.outputs.result == 'true'
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image-prefix.outputs.prefix }}-panel
           tags: |
@@ -58,6 +80,7 @@ jobs:
 
       - name: Build and push panel image
         uses: docker/build-push-action@v5
+        if: steps.publish.outputs.result == 'true'
         with:
           context: .
           file: ./panel/Dockerfile
@@ -70,6 +93,7 @@ jobs:
       - name: Extract metadata for node image
         id: meta-node
         uses: docker/metadata-action@v5
+        if: steps.publish.outputs.result == 'true'
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image-prefix.outputs.prefix }}-node
           tags: |
@@ -82,6 +106,7 @@ jobs:
 
       - name: Build and push node image
         uses: docker/build-push-action@v5
+        if: steps.publish.outputs.result == 'true'
         with:
           context: ./node
           file: ./node/Dockerfile
