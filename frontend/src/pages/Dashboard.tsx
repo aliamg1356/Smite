@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Server, Network, Cpu, MemoryStick, Plus, Activity as ActivityIcon } from 'lucide-react'
+import { Server, Network, Cpu, MemoryStick, Plus, Activity as ActivityIcon, TrendingUp } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import api from '../api/client'
+import { formatTraffic, formatTrafficRate } from '../utils/formatTraffic'
 
 interface Status {
   system: {
@@ -18,26 +20,47 @@ interface Status {
     total: number
     active: number
   }
+  traffic: {
+    total_mb: number
+    total_bytes: number
+    current_rate_mb_per_hour: number
+  }
+}
+
+interface TrafficStats {
+  total_mb: number
+  total_bytes: number
+  current_rate_mb_per_hour: number
+  time_series: Array<{
+    timestamp: string
+    bytes: number
+    mb: number
+  }>
 }
 
 const Dashboard = () => {
   const [status, setStatus] = useState<Status | null>(null)
+  const [trafficStats, setTrafficStats] = useState<TrafficStats | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const fetchStatus = async () => {
+    const fetchData = async () => {
       try {
-        const response = await api.get('/status')
-        setStatus(response.data)
+        const [statusResponse, trafficResponse] = await Promise.all([
+          api.get('/status'),
+          api.get('/usage/stats?hours=24')
+        ])
+        setStatus(statusResponse.data)
+        setTrafficStats(trafficResponse.data)
       } catch (error) {
-        console.error('Failed to fetch status:', error)
+        console.error('Failed to fetch data:', error)
       } finally {
         setLoading(false)
       }
     }
 
-    fetchStatus()
-    const interval = setInterval(fetchStatus, 5000)
+    fetchData()
+    const interval = setInterval(fetchData, 5000)
     return () => {
       clearInterval(interval)
     }
@@ -61,6 +84,28 @@ const Dashboard = () => {
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Dashboard</h1>
         <p className="text-gray-500 dark:text-gray-400">Overview of your system status and resources</p>
       </div>
+
+      {/* Traffic Summary Box */}
+      {status?.traffic && (
+        <div className="mb-8 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-700 dark:to-indigo-700 rounded-xl shadow-lg border border-blue-500 dark:border-blue-600 p-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-white/20 rounded-lg backdrop-blur-sm">
+                <TrendingUp className="w-8 h-8 text-white" />
+              </div>
+              <div>
+                <h2 className="text-sm font-medium text-blue-100 mb-1">Total Traffic</h2>
+                <p className="text-3xl font-bold text-white">
+                  {formatTraffic(status.traffic.total_mb)}
+                </p>
+                <p className="text-sm text-blue-100 mt-1">
+                  Current rate: {formatTrafficRate(status.traffic.current_rate_mb_per_hour)}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -93,6 +138,65 @@ const Dashboard = () => {
           color="orange"
         />
       </div>
+
+      {/* Traffic Chart */}
+      {trafficStats && trafficStats.time_series.length > 0 && (
+        <div className="mb-8 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 transition-shadow hover:shadow-md">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
+              <TrendingUp className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Traffic Usage (Last 24 Hours)</h2>
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={trafficStats.time_series}>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-gray-300 dark:stroke-gray-700" />
+              <XAxis 
+                dataKey="timestamp" 
+                tick={{ fill: '#6B7280' }}
+                className="text-xs"
+                tickFormatter={(value) => {
+                  const date = new Date(value)
+                  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+                }}
+              />
+              <YAxis 
+                tick={{ fill: '#6B7280' }}
+                className="text-xs"
+                tickFormatter={(value) => formatTraffic(value)}
+              />
+              <Tooltip 
+                contentStyle={{ 
+                  backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                  border: '1px solid #E5E7EB',
+                  borderRadius: '8px'
+                }}
+                labelStyle={{ color: '#374151', fontWeight: 'bold' }}
+                formatter={(value: number) => formatTraffic(value)}
+                labelFormatter={(label) => {
+                  const date = new Date(label)
+                  return date.toLocaleString('en-US', { 
+                    month: 'short', 
+                    day: 'numeric', 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  })
+                }}
+              />
+              <Legend />
+              <Line 
+                type="monotone" 
+                dataKey="mb" 
+                stroke="#4F46E5" 
+                strokeWidth={2}
+                dot={{ fill: '#4F46E5', r: 3 }}
+                activeDot={{ r: 5 }}
+                name="Traffic (MB)"
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       {/* Bottom Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel
 from typing import List
+from datetime import datetime, timedelta
 
 from app.database import get_db
 from app.models import Tunnel, Usage, Node
@@ -61,5 +62,61 @@ async def get_tunnel_usage(tunnel_id: str, db: AsyncSession = Depends(get_db)):
         "used_mb": tunnel.used_mb,
         "quota_mb": tunnel.quota_mb,
         "remaining_mb": max(0, tunnel.quota_mb - tunnel.used_mb) if tunnel.quota_mb > 0 else None
+    }
+
+
+@router.get("/stats")
+async def get_traffic_stats(
+    hours: int = 24,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get aggregate traffic statistics with time series data"""
+    now = datetime.utcnow()
+    start_time = now - timedelta(hours=hours)
+    
+    # Get total traffic (sum of all tunnel.used_mb)
+    total_result = await db.execute(
+        select(func.sum(Tunnel.used_mb))
+    )
+    total_mb = total_result.scalar() or 0.0
+    
+    # Get time series data - aggregate usage by hour
+    # For SQLite, we need to use strftime to group by hour
+    time_series_result = await db.execute(
+        select(
+            func.strftime('%Y-%m-%d %H:00:00', Usage.timestamp).label('hour'),
+            func.sum(Usage.bytes_used).label('total_bytes')
+        )
+        .where(Usage.timestamp >= start_time)
+        .group_by('hour')
+        .order_by('hour')
+    )
+    
+    time_series_data = []
+    for row in time_series_result.all():
+        hour_str = row.hour
+        total_bytes = row.total_bytes or 0
+        # Convert bytes to MB
+        total_mb_for_hour = total_bytes / (1024 * 1024)
+        time_series_data.append({
+            "timestamp": hour_str,
+            "bytes": total_bytes,
+            "mb": total_mb_for_hour
+        })
+    
+    # Get current rate (traffic in last hour)
+    one_hour_ago = now - timedelta(hours=1)
+    recent_result = await db.execute(
+        select(func.sum(Usage.bytes_used))
+        .where(Usage.timestamp >= one_hour_ago)
+    )
+    recent_bytes = recent_result.scalar() or 0
+    current_rate_mb_per_hour = recent_bytes / (1024 * 1024)
+    
+    return {
+        "total_mb": total_mb,
+        "total_bytes": int(total_mb * 1024 * 1024),
+        "current_rate_mb_per_hour": current_rate_mb_per_hour,
+        "time_series": time_series_data
     }
 
