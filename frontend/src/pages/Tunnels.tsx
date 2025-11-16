@@ -464,7 +464,8 @@ const EditTunnelModal = ({ tunnel, onClose, onSuccess }: EditTunnelModalProps) =
           const localHost = useV4ToV6 
             ? (formData.node_ipv6 || '::1')
             : '127.0.0.1'
-          updatedSpec.local_addr = `${localHost}:${formData.rathole_local_port}`
+          const localPort = parseInt(formData.rathole_local_port) || 8080
+          updatedSpec.local_addr = formatAddressPort(localHost, localPort)
         }
         // Store node IPv6 address if provided
         if (formData.node_ipv6) {
@@ -493,8 +494,17 @@ const EditTunnelModal = ({ tunnel, onClose, onSuccess }: EditTunnelModalProps) =
         updatedSpec.control_port = controlPort
         // Local port
         if (formData.rathole_local_port) {
-          const localHost = updatedSpec.use_ipv6 ? '::1' : '127.0.0.1'
-          updatedSpec.local_addr = `${localHost}:${formData.rathole_local_port}`
+          // Use IPv6 local address if v4 to v6 tunnel is enabled
+          // Use node IPv6 address if provided, otherwise default to ::1
+          const localHost = updatedSpec.use_ipv6 
+            ? (formData.node_ipv6 || '::1')
+            : '127.0.0.1'
+          const localPort = parseInt(formData.rathole_local_port) || 8080
+          updatedSpec.local_addr = formatAddressPort(localHost, localPort)
+        }
+        // Store node IPv6 address if provided
+        if (formData.node_ipv6) {
+          updatedSpec.node_ipv6 = formData.node_ipv6
         }
       } else if (tunnel.core === 'backhaul') {
         updatedSpec = buildBackhaulSpec(backhaulState, backhaulAdvanced, tunnel.type as BackhaulTransport)
@@ -836,7 +846,8 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
         const localHost = formData.use_ipv6 
           ? (formData.node_ipv6 || '::1')
           : '127.0.0.1'
-        spec.local_addr = `${localHost}:${formData.rathole_local_port}`
+        const localPort = parseInt(formData.rathole_local_port) || 8080
+        spec.local_addr = formatAddressPort(localHost, localPort)
         // Proxy port (listen_port) is where clients connect to access the tunneled service
         const port = parseInt(formData.port.toString()) || parseInt(formData.rathole_local_port) || 8090
         spec.remote_port = port
@@ -862,7 +873,7 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
         const localHost = formData.use_ipv6 
           ? (formData.node_ipv6 || '::1')
           : '127.0.0.1'
-        spec.local_addr = `${localHost}:${localPort}`
+        spec.local_addr = formatAddressPort(localHost, localPort)
         // Set panel host (same as Rathole uses window.location.hostname)
         const panelHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
         spec.panel_host = panelHost
