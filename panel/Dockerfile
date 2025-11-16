@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     curl \
     unzip \
+    gzip \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -36,8 +37,16 @@ RUN set -eux; \
     GOST_BIN="$(find "$GOST_TMP" -type f -name 'gost' | head -n1)"; \
     install -Dm755 "$GOST_BIN" /usr/local/bin/gost; \
     rm -rf "$GOST_TMP"; \
+    echo "Fetching chisel release"; \
+    CHISEL_URL="https://github.com/jpillora/chisel/releases/download/v1.11.3/chisel_1.11.3_linux_${ARCH}.gz"; \
+    CHISEL_TMP="$(mktemp -d)"; \
+    curl -fsSL "$CHISEL_URL" -o "$CHISEL_TMP/chisel.gz"; \
+    gunzip "$CHISEL_TMP/chisel.gz"; \
+    install -Dm755 "$CHISEL_TMP/chisel" /usr/local/bin/chisel; \
+    rm -rf "$CHISEL_TMP"; \
     /usr/local/bin/rathole --version || true; \
-    /usr/local/bin/gost -V || true
+    /usr/local/bin/gost -V || true; \
+    /usr/local/bin/chisel --version || true
 
 # Stage 3: Install backhaul (cached layer)
 FROM base AS backhaul-bin
@@ -96,6 +105,7 @@ WORKDIR /app
 # Copy binaries from binaries stage
 COPY --from=binaries /usr/local/bin/rathole /usr/local/bin/rathole
 COPY --from=binaries /usr/local/bin/gost /usr/local/bin/gost
+COPY --from=binaries /usr/local/bin/chisel /usr/local/bin/chisel
 COPY --from=backhaul-bin /opt/backhaul/backhaul /usr/local/bin/backhaul
 
 # Copy Python dependencies from deps stage
