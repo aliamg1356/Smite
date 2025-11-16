@@ -62,7 +62,7 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
         node = result.scalar_one_or_none()
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
-    elif tunnel.core in {"rathole", "backhaul"}:
+    elif tunnel.core in {"rathole", "backhaul", "chisel"}:
         raise HTTPException(status_code=400, detail=f"Node is required for {tunnel.core.title()} tunnels")
     
     db_tunnel = Tunnel(
@@ -242,6 +242,9 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     return db_tunnel
         
         if needs_node_apply:
+            if not node:
+                raise HTTPException(status_code=400, detail=f"Node is required for {db_tunnel.core.title()} tunnels")
+            
             client = Hysteria2Client()
             if not node.node_metadata.get("api_address"):
                 node.node_metadata["api_address"] = f"http://{node.node_metadata.get('ip_address', node.fingerprint)}:{node.node_metadata.get('api_port', 8888)}"
