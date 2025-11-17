@@ -107,14 +107,15 @@ def cmd_status(args):
 
 
 def cmd_update(args):
-    """Update node"""
+    """Update node (pull images and recreate)"""
     print("Updating node...")
     run_docker_compose(["pull"])
     run_docker_compose(["up", "-d", "--force-recreate"])
+    print("Node updated.")
 
 
 def cmd_restart(args):
-    """Restart node (preserves tunnels, picks up .env changes)"""
+    """Restart node (recreate container to pick up .env changes, no pull)"""
     print("Restarting node...")
     # Recreate container to pick up .env changes, but preserve volumes
     # This ensures tunnels are preserved (they're managed by the panel)
@@ -153,9 +154,9 @@ def main():
     
     subparsers.add_parser("status", help="Show node status")
     
-    subparsers.add_parser("update", help="Update node")
+    subparsers.add_parser("update", help="Update node (pull images and recreate)")
     
-    subparsers.add_parser("restart", help="Restart node (preserves tunnels)")
+    subparsers.add_parser("restart", help="Restart node (recreate to pick up .env changes)")
     
     subparsers.add_parser("edit", help="Edit docker-compose.yml")
     

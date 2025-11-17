@@ -669,14 +669,15 @@ def cmd_status(args):
 
 
 def cmd_update(args):
-    """Update panel"""
+    """Update panel (pull images and recreate)"""
     print("Updating panel...")
     run_docker_compose(["pull"])
     run_docker_compose(["up", "-d", "--force-recreate"])
+    print("Panel updated.")
 
 
 def cmd_restart(args):
-    """Restart panel (preserves tunnels, picks up .env changes)"""
+    """Restart panel (recreate container to pick up .env changes, no pull)"""
     print("Restarting panel...")
     # Recreate container to pick up .env changes, but preserve volumes
     # This ensures tunnels are preserved (they're in the database which is in a volume)
@@ -726,9 +727,9 @@ def main():
     
     subparsers.add_parser("status", help="Show system status")
     
-    subparsers.add_parser("update", help="Update panel")
+    subparsers.add_parser("update", help="Update panel (pull images and recreate)")
     
-    subparsers.add_parser("restart", help="Restart panel (preserves tunnels)")
+    subparsers.add_parser("restart", help="Restart panel (recreate to pick up .env changes)")
     
     subparsers.add_parser("edit", help="Edit docker-compose.yml")
     
