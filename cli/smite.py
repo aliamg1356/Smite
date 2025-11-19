@@ -714,7 +714,7 @@ def cmd_restart(args):
     result = subprocess.run(["docker", "ps", "--filter", "name=smite-nginx", "--format", "{{.Names}}"], capture_output=True, text=True)
     if result.stdout.strip():
         print("Restarting nginx...")
-        run_docker_compose(["restart", "smite-nginx"])
+        run_docker_compose(["--profile", "https", "restart", "smite-nginx"])
     
     print("Panel restarted. Tunnels are preserved.")
 
