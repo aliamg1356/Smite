@@ -79,7 +79,7 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
     try:
-        uvicorn.run(app, host="0.0.0.0", port=8888)
+        uvicorn.run(app, host="0.0.0.0", port=settings.node_api_port)
     except Exception as e:
         logger.error(f"Failed to start server: {e}", exc_info=True)
         raise

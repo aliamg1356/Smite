@@ -99,4 +99,8 @@ COPY . .
 
 EXPOSE 8888
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8888", "--log-level", "info", "--access-log"]
+RUN echo '#!/bin/sh' > /app/start.sh && \
+    echo 'exec uvicorn main:app --host 0.0.0.0 --port "${NODE_API_PORT:-8888}" --log-level info --access-log' >> /app/start.sh && \
+    chmod +x /app/start.sh
+
+CMD ["/bin/sh", "/app/start.sh"]
