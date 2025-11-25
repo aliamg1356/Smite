@@ -312,7 +312,14 @@ async def _reset_core(core: str, app_or_request, db: AsyncSession):
         if manager:
             for tunnel in active_tunnels:
                 try:
-                    server_port = tunnel.spec.get("server_port") or tunnel.spec.get("listen_port")
+                    # Chisel server uses control_port (listen_port + 10000) or the control_port from spec
+                    listen_port = tunnel.spec.get("listen_port") or tunnel.spec.get("remote_port")
+                    server_port = tunnel.spec.get("control_port")
+                    if not server_port and listen_port:
+                        server_port = int(listen_port) + 10000
+                    elif not server_port:
+                        logger.warning(f"Chisel tunnel {tunnel.id}: Missing listen_port and control_port, skipping reset")
+                        continue
                     auth = tunnel.spec.get("auth")
                     fingerprint = tunnel.spec.get("fingerprint")
                     use_ipv6 = tunnel.spec.get("use_ipv6", False)
