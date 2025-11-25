@@ -572,6 +572,9 @@ class FrpAdapter:
             logger.info(f"FRP tunnel {tunnel_id} already exists, removing it first")
             self.remove(tunnel_id)
         
+        # Log the full spec for debugging
+        logger.info(f"FRP tunnel {tunnel_id} received spec: {spec}")
+        
         server_addr = spec.get('server_addr', '').strip()
         server_port = spec.get('server_port', 7000)
         token = spec.get('token')
@@ -579,6 +582,8 @@ class FrpAdapter:
         local_port = spec.get('local_port')
         remote_port = spec.get('remote_port') or spec.get('listen_port')
         local_ip = spec.get('local_ip', '127.0.0.1')
+        
+        logger.info(f"FRP tunnel {tunnel_id} parsed: server_addr='{server_addr}', server_port={server_port}, token={'set' if token else 'none'}")
         
         if not server_addr:
             raise ValueError("FRP requires 'server_addr' (panel server address) in spec")
@@ -621,15 +626,19 @@ remotePort = {remote_port}
         
         # Log the actual config file content for debugging
         logger.info(f"FRP tunnel {tunnel_id}: type={tunnel_type}, local={local_ip}:{local_port}, remote={remote_port}, server={server_addr}:{server_port}")
-        logger.debug(f"FRP config file {config_file} content:\n{config_content}")
+        logger.info(f"FRP config file {config_file} content:\n{config_content}")
         
         # Verify the config file was written correctly
         if config_file.exists():
             with open(config_file, 'r') as f:
                 written_content = f.read()
-                if 'serverAddr = "0.0.0.0"' in written_content:
+                logger.info(f"FRP config file {config_file} read back:\n{written_content}")
+                if 'serverAddr = "0.0.0.0"' in written_content or 'serverAddr = 0.0.0.0' in written_content:
                     logger.error(f"ERROR: Config file contains 0.0.0.0! Written content:\n{written_content}")
                     raise ValueError(f"Config file incorrectly contains 0.0.0.0. server_addr was: {server_addr}")
+                if server_addr not in written_content:
+                    logger.error(f"ERROR: Config file does not contain server_addr '{server_addr}'! Written content:\n{written_content}")
+                    raise ValueError(f"Config file does not contain expected server_addr '{server_addr}'")
         
         binary_path = self._resolve_binary_path()
         cmd = [

@@ -864,15 +864,18 @@ async def apply_tunnel(tunnel_id: str, request: Request, db: AsyncSession = Depe
         
         # Prepare spec for node (recalculate FRP server_addr if needed)
         spec_for_node = tunnel.spec.copy() if tunnel.spec else {}
+        logger.info(f"Applying tunnel {tunnel.id} (core={tunnel.core}): original spec={spec_for_node}")
+        
         if tunnel.core == "frp":
             try:
                 spec_for_node = prepare_frp_spec_for_node(spec_for_node, node, request)
-                logger.info(f"FRP spec prepared for tunnel {tunnel.id}: server_addr={spec_for_node.get('server_addr')}")
+                logger.info(f"FRP spec prepared for tunnel {tunnel.id}: server_addr={spec_for_node.get('server_addr')}, server_port={spec_for_node.get('server_port')}, full spec={spec_for_node}")
             except Exception as e:
                 error_msg = f"Failed to prepare FRP spec: {str(e)}"
                 logger.error(f"Tunnel {tunnel.id}: {error_msg}", exc_info=True)
                 raise HTTPException(status_code=500, detail=error_msg)
         
+        logger.info(f"Sending tunnel {tunnel.id} to node {node.id}: spec={spec_for_node}")
         response = await client.send_to_node(
             node_id=node.id,
             endpoint="/api/agent/tunnels/apply",
