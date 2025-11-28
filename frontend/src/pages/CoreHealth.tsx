@@ -39,21 +39,28 @@ const CoreHealth = () => {
       ])
       setHealth(healthRes.data)
       
-      // When updating configs, preserve any newer last_reset timestamps we have locally
-      setConfigs(prevConfigs => {
-        const newConfigs: ResetConfig[] = configsRes.data
-        return newConfigs.map((newConfig: ResetConfig) => {
-          const prevConfig = prevConfigs.find(c => c.core === newConfig.core)
-          if (prevConfig?.last_reset && newConfig.last_reset) {
-            const prevTime = new Date(prevConfig.last_reset).getTime()
-            const newTime = new Date(newConfig.last_reset).getTime()
-            // If our local timestamp is newer, keep it
-            if (prevTime > newTime) {
-              return { ...newConfig, last_reset: prevConfig.last_reset }
+      // Update configs
+      setConfigs(configsRes.data)
+      
+      // Sync client reset times with server (detect auto-reset)
+      setClientResetTimes(prevClientTimes => {
+        const updated: Record<string, number> = { ...prevClientTimes }
+        
+        configsRes.data.forEach((config: ResetConfig) => {
+          if (config.last_reset) {
+            const serverTime = new Date(config.last_reset).getTime()
+            const clientTime = prevClientTimes[config.core]
+            
+            // If server time is newer than client time (or no client time exists), use server time
+            // This handles both initial page load and auto-reset detection
+            if (!clientTime || serverTime > clientTime) {
+              // Use server timestamp as milliseconds since epoch
+              updated[config.core] = serverTime
             }
           }
-          return newConfig
         })
+        
+        return updated
       })
     } catch (error) {
       console.error('Failed to fetch core health:', error)
