@@ -43,22 +43,32 @@ const CoreHealth = () => {
       setConfigs(configsRes.data)
       
       // Sync client reset times with server (detect auto-reset)
+      // Always use server timestamp as source of truth to avoid timezone/clock sync issues
       setClientResetTimes(prevClientTimes => {
-        const updated: Record<string, number> = { ...prevClientTimes }
+        const updated: Record<string, number> = {}
+        const now = Date.now()
         
         configsRes.data.forEach((config: ResetConfig) => {
           if (config.last_reset) {
             const serverTime = new Date(config.last_reset).getTime()
             const clientTime = prevClientTimes[config.core]
             
-            // If server time is newer than client time (or no client time exists), use server time
-            // This handles both initial page load and auto-reset detection
-            if (!clientTime || serverTime > clientTime) {
-              // Use server timestamp as milliseconds since epoch
-              updated[config.core] = serverTime
-              console.log(`[CoreHealth] Updated ${config.core} reset time: server=${new Date(serverTime).toISOString()}, client was=${clientTime ? new Date(clientTime).toISOString() : 'none'}`)
+            // Only keep client time if it was set very recently (within last 5 seconds)
+            // and server time is not significantly newer (within 10 seconds of client time)
+            // This allows immediate UI feedback for manual resets while still syncing with server
+            const clientTimeAge = clientTime ? now - clientTime : Infinity
+            const timeDiff = clientTime ? Math.abs(serverTime - clientTime) : Infinity
+            
+            if (clientTime && clientTimeAge < 5000 && timeDiff < 10000) {
+              // Keep client time if it was set very recently and close to server time
+              updated[config.core] = clientTime
+              console.log(`[CoreHealth] Keeping recent client reset time for ${config.core}: client=${new Date(clientTime).toISOString()}, server=${new Date(serverTime).toISOString()}`)
             } else {
-              console.log(`[CoreHealth] Keeping client reset time for ${config.core}: client=${new Date(clientTime).toISOString()}, server=${new Date(serverTime).toISOString()}`)
+              // Always use server time as source of truth
+              updated[config.core] = serverTime
+              if (clientTime) {
+                console.log(`[CoreHealth] Updated ${config.core} reset time from server: server=${new Date(serverTime).toISOString()}, old client=${new Date(clientTime).toISOString()}`)
+              }
             }
           }
         })
