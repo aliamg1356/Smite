@@ -33,7 +33,11 @@ const Nodes = () => {
   const fetchNodes = async () => {
     try {
       const response = await api.get('/nodes')
-      setNodes(response.data)
+      // Show only Iran-side nodes (default role is iran when missing)
+      const iranNodes = response.data.filter((node: Node) => 
+        node.metadata?.role === 'iran' || !node.metadata?.role
+      )
+      setNodes(iranNodes)
     } catch (error) {
       console.error('Failed to fetch nodes:', error)
     } finally {
@@ -430,4 +434,3 @@ const CertModal = ({ certContent, loading, onClose, onCopy, copied }: CertModalP
 }
 
 export default Nodes
-
