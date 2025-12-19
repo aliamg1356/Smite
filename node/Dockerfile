@@ -114,6 +114,7 @@ COPY --from=rathole-bin /usr/local/bin/rathole /usr/local/bin/rathole
 COPY --from=rathole-bin /usr/local/bin/chisel /usr/local/bin/chisel
 COPY --from=rathole-bin /usr/local/bin/frpc /usr/local/bin/frpc
 COPY --from=rathole-bin /usr/local/bin/frps /usr/local/bin/frps
+COPY --from=rathole-bin /usr/local/bin/gost /usr/local/bin/gost
 COPY --from=backhaul-bin /opt/backhaul/backhaul /usr/local/bin/backhaul
 
 # Copy Python dependencies from deps stage
