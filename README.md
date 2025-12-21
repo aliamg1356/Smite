@@ -30,7 +30,6 @@
 - **CLI Tools**: Powerful command-line tools for management
 - **Node Support**: Easy reverse tunnel setup with Backhaul, Rathole, Chisel, and FRP nodes
 - **GOST Forwarding**: Forward traffic from Iran nodes to Foreign servers with support for TCP, UDP, WebSocket, gRPC, and TCPMux
-- **Connection Status**: Real-time monitoring of node and server connection states (connecting, connected, reconnecting, failed)
 
 ---
 
