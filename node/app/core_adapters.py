@@ -92,12 +92,19 @@ class RatholeAdapter:
         if mode == 'server':
             bind_addr = spec.get('bind_addr', '0.0.0.0:23333')
             token = spec.get('token', '').strip()
-            proxy_port = spec.get('proxy_port') or spec.get('remote_port') or spec.get('listen_port')
+            
+            # Support multiple ports
+            ports = spec.get('ports', [])
+            if not ports:
+                # Fallback to single port for backward compatibility
+                proxy_port = spec.get('proxy_port') or spec.get('remote_port') or spec.get('listen_port')
+                if proxy_port:
+                    ports = [int(proxy_port) if isinstance(proxy_port, (int, str)) and str(proxy_port).isdigit() else proxy_port]
             
             if not token:
                 raise ValueError("Rathole server requires 'token' in spec")
-            if not proxy_port:
-                raise ValueError("Rathole server requires 'proxy_port' or 'remote_port' in spec")
+            if not ports:
+                raise ValueError("Rathole server requires 'ports' array or 'proxy_port'/'remote_port' in spec")
             
             bind_host, bind_port, is_ipv6 = parse_address_port(bind_addr)
             if not bind_port:
@@ -119,9 +126,13 @@ type = "websocket"
                 if websocket_tls:
                     config += "tls = true\n"
             
-            config += f"""
-[server.services.{tunnel_id}]
-bind_addr = "0.0.0.0:{proxy_port}"
+            # Create multiple service sections for multiple ports
+            for i, port in enumerate(ports):
+                port_num = int(port) if isinstance(port, (int, str)) and str(port).isdigit() else port
+                service_name = f"{tunnel_id}_{i}" if len(ports) > 1 else tunnel_id
+                config += f"""
+[server.services.{service_name}]
+bind_addr = "0.0.0.0:{port_num}"
 """
             
             config_path = self.config_dir / f"{tunnel_id}.toml"
@@ -143,7 +154,18 @@ bind_addr = "0.0.0.0:{proxy_port}"
         else:
             remote_addr = spec.get('remote_addr', '').strip()
             token = spec.get('token', '').strip()
-            local_addr = spec.get('local_addr', '127.0.0.1:8080')
+            
+            # Support multiple ports
+            ports = spec.get('ports', [])
+            if not ports:
+                # Fallback to single port for backward compatibility
+                local_addr = spec.get('local_addr', '127.0.0.1:8080')
+                # Extract port from local_addr
+                _, local_port, _ = parse_address_port(local_addr)
+                if local_port:
+                    ports = [local_port]
+                else:
+                    ports = [8080]
             
             if not remote_addr:
                 raise ValueError("Rathole client requires 'remote_addr' (foreign server address) in spec")
@@ -171,8 +193,13 @@ type = "websocket"
                 if websocket_tls:
                     config += "tls = true\n"
             
-            config += f"""
-[client.services.{tunnel_id}]
+            # Create multiple service sections for multiple ports
+            for i, port in enumerate(ports):
+                port_num = int(port) if isinstance(port, (int, str)) and str(port).isdigit() else port
+                service_name = f"{tunnel_id}_{i}" if len(ports) > 1 else tunnel_id
+                local_addr = f"127.0.0.1:{port_num}"
+                config += f"""
+[client.services.{service_name}]
 local_addr = "{local_addr}"
 """
             
@@ -606,35 +633,46 @@ class ChiselAdapter:
                 raise RuntimeError("chisel binary not found. Please install chisel.")
         else:
             server_url = spec.get('server_url', '').strip()
-            reverse_port = spec.get('reverse_port') or spec.get('remote_port') or spec.get('listen_port') or spec.get('server_port')
-            local_addr = spec.get('local_addr')
+            
+            # Support multiple ports
+            ports = spec.get('ports', [])
+            if not ports:
+                # Fallback to single port for backward compatibility
+                reverse_port = spec.get('reverse_port') or spec.get('remote_port') or spec.get('listen_port') or spec.get('server_port')
+                if reverse_port:
+                    ports = [int(reverse_port) if isinstance(reverse_port, (int, str)) and str(reverse_port).isdigit() else reverse_port]
             
             if not server_url:
                 raise ValueError("Chisel client requires 'server_url' (foreign server address) in spec")
-            if not reverse_port:
-                raise ValueError("Chisel client requires 'reverse_port', 'remote_port', or 'listen_port' in spec")
-            
-            if not local_addr:
-                local_addr = f"127.0.0.1:{reverse_port}"
-                logger.warning(f"Chisel tunnel {tunnel_id}: local_addr not specified, defaulting to {local_addr}")
-            
-            host, port, is_ipv6 = parse_address_port(local_addr)
-            if not port:
-                raise ValueError(f"Invalid local_addr format: {local_addr} (port required)")
-            
-            if is_ipv6:
-                reverse_spec = f"R:{reverse_port}:[{host}]:{port}"
-            else:
-                reverse_spec = f"R:{reverse_port}:{host}:{port}"
-            logger.info(f"Chisel tunnel {tunnel_id}: reverse_spec={reverse_spec}, server_url={server_url}")
+            if not ports:
+                raise ValueError("Chisel client requires 'ports' array or 'reverse_port'/'remote_port'/'listen_port' in spec")
             
             binary_path = self._resolve_binary_path()
             cmd = [
                 str(binary_path),
                 "client",
-                server_url,
-                reverse_spec
+                server_url
             ]
+            
+            # Add multiple reverse specs for multiple ports
+            for port in ports:
+                port_num = int(port) if isinstance(port, (int, str)) and str(port).isdigit() else port
+                local_addr = spec.get('local_addr')
+                if not local_addr:
+                    local_addr = f"127.0.0.1:{port_num}"
+                
+                host, local_port, is_ipv6 = parse_address_port(local_addr)
+                if not local_port:
+                    host = "127.0.0.1"
+                    local_port = port_num
+                
+                if is_ipv6:
+                    reverse_spec = f"R:{port_num}:[{host}]:{local_port}"
+                else:
+                    reverse_spec = f"R:{port_num}:{host}:{local_port}"
+                cmd.append(reverse_spec)
+            
+            logger.info(f"Chisel tunnel {tunnel_id}: ports={ports}, server_url={server_url}")
             
             auth = spec.get('auth')
             if auth:
@@ -830,18 +868,27 @@ class FrpAdapter:
             server_port = spec.get('server_port', 7000)
             token = spec.get('token')
             tunnel_type = spec.get('type', 'tcp').lower()
-            local_port = spec.get('local_port')
-            remote_port = spec.get('remote_port') or spec.get('listen_port')
             local_ip = spec.get('local_ip', '127.0.0.1')
             
-            logger.info(f"FRP tunnel {tunnel_id} parsed: server_addr='{server_addr}', server_port={server_port}, token={'set' if token else 'none'}")
+            # Support multiple ports
+            ports = spec.get('ports', [])
+            if not ports:
+                # Fallback to single port for backward compatibility
+                local_port = spec.get('local_port')
+                remote_port = spec.get('remote_port') or spec.get('listen_port')
+                if remote_port and local_port:
+                    ports = [{'local': local_port, 'remote': remote_port}]
+                elif remote_port:
+                    ports = [{'local': remote_port, 'remote': remote_port}]
+                elif local_port:
+                    ports = [{'local': local_port, 'remote': local_port}]
+            
+            logger.info(f"FRP tunnel {tunnel_id} parsed: server_addr='{server_addr}', server_port={server_port}, token={'set' if token else 'none'}, ports={len(ports)}")
             
             if not server_addr:
                 raise ValueError("FRP client requires 'server_addr' (foreign server address) in spec")
-            if not remote_port:
-                raise ValueError("FRP client requires 'remote_port' or 'listen_port' in spec")
-            if not local_port:
-                raise ValueError("FRP client requires 'local_port' in spec")
+            if not ports:
+                raise ValueError("FRP client requires 'ports' array or 'remote_port'/'listen_port' in spec")
             if tunnel_type not in ['tcp', 'udp']:
                 raise ValueError(f"FRP only supports 'tcp' and 'udp' types, got '{tunnel_type}'")
             
@@ -861,9 +908,18 @@ serverPort: {server_port}
   token: "{token}"
 """
             
-            config_content += f"""
-proxies:
-  - name: {tunnel_id}
+            config_content += "\nproxies:\n"
+            # Create multiple proxy entries for multiple ports
+            for i, port_config in enumerate(ports):
+                if isinstance(port_config, dict):
+                    local_port = port_config.get('local')
+                    remote_port = port_config.get('remote')
+                else:
+                    # If ports is a list of numbers, use same port for local and remote
+                    local_port = remote_port = port_config
+                
+                proxy_name = f"{tunnel_id}_{i}" if len(ports) > 1 else tunnel_id
+                config_content += f"""  - name: {proxy_name}
     type: {tunnel_type}
     localIP: {local_ip}
     localPort: {local_port}
@@ -1007,63 +1063,77 @@ class GostAdapter:
             logger.info(f"GOST tunnel {tunnel_id} already exists, removing it first")
             self.remove(tunnel_id)
         
-        listen_port = spec.get('listen_port') or spec.get('remote_port')
+        # Support multiple ports
+        ports = spec.get('ports', [])
+        if not ports:
+            # Fallback to single port for backward compatibility
+            listen_port = spec.get('listen_port') or spec.get('remote_port')
+            if listen_port:
+                ports = [int(listen_port) if isinstance(listen_port, (int, str)) and str(listen_port).isdigit() else listen_port]
+        
         forward_to = spec.get('forward_to')
+        remote_ip = spec.get('remote_ip', '127.0.0.1')
         
-        if not forward_to:
-            remote_ip = spec.get('remote_ip', '127.0.0.1')
-            remote_port = spec.get('remote_port', 8080)
-            forward_to = f"{remote_ip}:{remote_port}"
-        
-        if not listen_port:
-            raise ValueError("GOST requires 'listen_port' or 'remote_port' in spec")
-        if not forward_to:
-            raise ValueError("GOST requires 'forward_to' or ('remote_ip' and 'remote_port') in spec")
+        if not ports:
+            raise ValueError("GOST requires 'ports' array or 'listen_port'/'remote_port' in spec")
+        if not forward_to and not remote_ip:
+            raise ValueError("GOST requires 'forward_to' or 'remote_ip' in spec")
         
         tunnel_type = spec.get('type', 'tcp').lower()
         use_ipv6 = spec.get('use_ipv6', False)
         
-        forward_host, forward_port, forward_is_ipv6 = parse_address_port(forward_to)
-        if forward_port is None:
-            forward_port = 8080
-        
-        if forward_is_ipv6:
-            target_addr = f"[{forward_host}]:{forward_port}"
-        else:
-            target_addr = f"{forward_host}:{forward_port}"
-        
-        if use_ipv6:
-            listen_addr = f"[::]:{listen_port}"
-        else:
-            listen_addr = f"0.0.0.0:{listen_port}"
-        
         binary_path = self._resolve_binary_path()
+        cmd = [str(binary_path)]
         
-        if tunnel_type == "tcp":
-            cmd = [str(binary_path), f"-L=tcp://{listen_addr}/{target_addr}"]
-        elif tunnel_type == "udp":
-            cmd = [str(binary_path), f"-L=udp://{listen_addr}/{target_addr}"]
-        elif tunnel_type == "ws":
-            import socket
-            try:
-                if use_ipv6:
-                    s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-                    s.connect(("2001:4860:4860::8888", 80))
-                    bind_ip = s.getsockname()[0]
-                else:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    s.connect(("8.8.8.8", 80))
-                    bind_ip = s.getsockname()[0]
-                s.close()
-            except Exception:
-                bind_ip = "[::]" if use_ipv6 else "0.0.0.0"
-            cmd = [str(binary_path), f"-L=ws://{bind_ip}:{listen_port}/tcp://{target_addr}"]
-        elif tunnel_type == "grpc":
-            cmd = [str(binary_path), f"-L=grpc://{listen_addr}/{target_addr}"]
-        elif tunnel_type == "tcpmux":
-            cmd = [str(binary_path), f"-L=tcpmux://{listen_addr}/{target_addr}"]
-        else:
-            raise ValueError(f"Unsupported GOST tunnel type: {tunnel_type}")
+        # Add multiple -L flags for multiple ports
+        for port in ports:
+            port_num = int(port) if isinstance(port, (int, str)) and str(port).isdigit() else port
+            
+            # Determine target address
+            if forward_to:
+                forward_host, forward_port, forward_is_ipv6 = parse_address_port(forward_to)
+                if forward_port is None:
+                    forward_port = port_num
+            else:
+                forward_host = remote_ip
+                forward_port = port_num
+                forward_is_ipv6 = use_ipv6
+            
+            if forward_is_ipv6:
+                target_addr = f"[{forward_host}]:{forward_port}"
+            else:
+                target_addr = f"{forward_host}:{forward_port}"
+            
+            if use_ipv6:
+                listen_addr = f"[::]:{port_num}"
+            else:
+                listen_addr = f"0.0.0.0:{port_num}"
+            
+            if tunnel_type == "tcp":
+                cmd.append(f"-L=tcp://{listen_addr}/{target_addr}")
+            elif tunnel_type == "udp":
+                cmd.append(f"-L=udp://{listen_addr}/{target_addr}")
+            elif tunnel_type == "ws":
+                import socket
+                try:
+                    if use_ipv6:
+                        s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+                        s.connect(("2001:4860:4860::8888", 80))
+                        bind_ip = s.getsockname()[0]
+                    else:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        s.connect(("8.8.8.8", 80))
+                        bind_ip = s.getsockname()[0]
+                    s.close()
+                except Exception:
+                    bind_ip = "[::]" if use_ipv6 else "0.0.0.0"
+                cmd.append(f"-L=ws://{bind_ip}:{port_num}/tcp://{target_addr}")
+            elif tunnel_type == "grpc":
+                cmd.append(f"-L=grpc://{listen_addr}/{target_addr}")
+            elif tunnel_type == "tcpmux":
+                cmd.append(f"-L=tcpmux://{listen_addr}/{target_addr}")
+            else:
+                raise ValueError(f"Unsupported GOST tunnel type: {tunnel_type}")
         
         log_file = self.config_dir / f"{tunnel_id}.log"
         log_f = open(log_file, 'w', buffering=1)

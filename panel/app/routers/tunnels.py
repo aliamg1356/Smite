@@ -122,12 +122,30 @@ class TunnelResponse(BaseModel):
         from_attributes = True
 
 
+def parse_ports_from_spec(spec: dict) -> list:
+    """Parse ports from spec - supports both comma-separated string and list formats"""
+    ports = spec.get("ports", [])
+    if isinstance(ports, str):
+        # Comma-separated string: "8080,8081,8082"
+        ports = [int(p.strip()) for p in ports.split(",") if p.strip().isdigit()]
+    elif isinstance(ports, list) and ports:
+        # List of numbers or strings
+        ports = [int(p) if isinstance(p, (int, str)) and str(p).isdigit() else p for p in ports]
+    return ports if ports else []
+
+
 @router.post("", response_model=TunnelResponse)
 async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession = Depends(get_db)):
     """Create a new tunnel and auto-apply it"""
     from app.node_client import NodeClient
     
     logger.info(f"Creating tunnel: name={tunnel.name}, type={tunnel.type}, core={tunnel.core}, node_id={tunnel.node_id}")
+    
+    # Parse ports from spec if provided
+    if tunnel.spec:
+        ports = parse_ports_from_spec(tunnel.spec)
+        if ports:
+            tunnel.spec["ports"] = ports
     
     is_reverse_tunnel = tunnel.core in {"rathole", "backhaul", "chisel", "frp"}
     foreign_node = None
@@ -233,11 +251,19 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
             
             if db_tunnel.core == "rathole":
                 transport = server_spec.get("transport") or server_spec.get("type") or "tcp"
-                proxy_port = server_spec.get("remote_port") or server_spec.get("listen_port")
                 token = server_spec.get("token")
-                if not proxy_port or not token:
+                
+                # Handle multiple ports
+                ports = parse_ports_from_spec(spec)
+                if not ports:
+                    # Fallback to single port for backward compatibility
+                    proxy_port = server_spec.get("remote_port") or server_spec.get("listen_port")
+                    if proxy_port:
+                        ports = [int(proxy_port) if isinstance(proxy_port, (int, str)) and str(proxy_port).isdigit() else proxy_port]
+                
+                if not ports or not token:
                     db_tunnel.status = "error"
-                    db_tunnel.error_message = "Rathole requires remote_port and token"
+                    db_tunnel.error_message = "Rathole requires ports and token"
                     await db.commit()
                     await db.refresh(db_tunnel)
                     return db_tunnel
@@ -250,7 +276,7 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     port_hash = int(hashlib.md5(db_tunnel.id.encode()).hexdigest()[:8], 16)
                     control_port = 23333 + (port_hash % 1000)
                 server_spec["bind_addr"] = f"0.0.0.0:{control_port}"
-                server_spec["proxy_port"] = proxy_port
+                server_spec["ports"] = ports
                 server_spec["transport"] = transport
                 server_spec["type"] = transport
                 if "websocket_tls" in server_spec:
@@ -275,20 +301,24 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 client_spec["transport"] = transport
                 client_spec["type"] = transport
                 client_spec["token"] = token
+                client_spec["ports"] = ports  # Pass ports to client
                 if "websocket_tls" in server_spec:
                     client_spec["websocket_tls"] = server_spec["websocket_tls"]
                 elif "tls" in server_spec:
                     client_spec["websocket_tls"] = server_spec["tls"]
-                local_addr = client_spec.get("local_addr")
-                if not local_addr:
-                    local_addr = f"{iran_node_ip}:{proxy_port}"
-                client_spec["local_addr"] = local_addr
                 
             elif db_tunnel.core == "chisel":
-                listen_port = server_spec.get("listen_port") or server_spec.get("remote_port")
-                if not listen_port:
+                # Handle multiple ports
+                ports = parse_ports_from_spec(spec)
+                if not ports:
+                    # Fallback to single port for backward compatibility
+                    listen_port = server_spec.get("listen_port") or server_spec.get("remote_port")
+                    if listen_port:
+                        ports = [int(listen_port) if isinstance(listen_port, (int, str)) and str(listen_port).isdigit() else listen_port]
+                
+                if not ports:
                     db_tunnel.status = "error"
-                    db_tunnel.error_message = "Chisel requires listen_port"
+                    db_tunnel.error_message = "Chisel requires ports"
                     await db.commit()
                     await db.refresh(db_tunnel)
                     return db_tunnel
@@ -302,9 +332,10 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     return db_tunnel
                 import hashlib
                 port_hash = int(hashlib.md5(db_tunnel.id.encode()).hexdigest()[:8], 16)
-                server_control_port = server_spec.get("control_port") or (int(listen_port) + 10000 + (port_hash % 1000))
+                first_port = int(ports[0]) if isinstance(ports[0], (int, str)) and str(ports[0]).isdigit() else ports[0]
+                server_control_port = server_spec.get("control_port") or (int(first_port) + 10000 + (port_hash % 1000))
                 server_spec["server_port"] = server_control_port
-                server_spec["reverse_port"] = listen_port
+                server_spec["reverse_port"] = first_port  # Keep for backward compatibility
                 auth = server_spec.get("auth")
                 if auth:
                     server_spec["auth"] = auth
@@ -313,15 +344,11 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     server_spec["fingerprint"] = fingerprint
                 
                 client_spec["server_url"] = f"http://{iran_node_ip}:{server_control_port}"
-                client_spec["reverse_port"] = listen_port
+                client_spec["ports"] = ports  # Pass ports to client
                 if auth:
                     client_spec["auth"] = auth
                 if fingerprint:
                     client_spec["fingerprint"] = fingerprint
-                local_addr = client_spec.get("local_addr")
-                if not local_addr:
-                    local_addr = f"{iran_node_ip}:{listen_port}"
-                client_spec["local_addr"] = local_addr
                 
             elif db_tunnel.core == "frp":
                 import hashlib
@@ -348,16 +375,24 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     tunnel_type = "tcp"  # Default to tcp if invalid
                 client_spec["type"] = tunnel_type
                 local_ip = client_spec.get("local_ip") or iran_node_ip
-                # Ensure local_port is set - required by FRP adapter
-                local_port = client_spec.get("local_port")
-                if not local_port:
-                    # If not provided, use listen_port or remote_port from spec, or default to bind_port
-                    local_port = spec.get("listen_port") or spec.get("remote_port") or bind_port
-                client_spec["local_ip"] = local_ip
-                client_spec["local_port"] = local_port
-                # Ensure remote_port is set for FRP
-                if "remote_port" not in client_spec:
-                    client_spec["remote_port"] = spec.get("remote_port") or spec.get("listen_port") or bind_port
+                
+                # Handle multiple ports
+                ports = spec.get("ports", [])
+                if ports:
+                    # Convert list of port numbers to list of dicts with local and remote
+                    if isinstance(ports[0], (int, str)):
+                        client_spec["ports"] = [{"local": int(p), "remote": int(p)} for p in ports]
+                    else:
+                        client_spec["ports"] = ports
+                else:
+                    # Fallback to single port for backward compatibility
+                    local_port = client_spec.get("local_port")
+                    if not local_port:
+                        local_port = spec.get("listen_port") or spec.get("remote_port") or bind_port
+                    client_spec["local_ip"] = local_ip
+                    client_spec["local_port"] = local_port
+                    if "remote_port" not in client_spec:
+                        client_spec["remote_port"] = spec.get("remote_port") or spec.get("listen_port") or bind_port
                 
             elif db_tunnel.core == "backhaul":
                 transport = server_spec.get("transport") or server_spec.get("type") or "tcp"
@@ -822,20 +857,27 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                         await db.refresh(db_tunnel)
                         return db_tunnel
                     
-                    listen_port = db_tunnel.spec.get("listen_port") or db_tunnel.spec.get("remote_port")
-                    remote_port = db_tunnel.spec.get("remote_port", 8080)
-                    use_ipv6 = db_tunnel.spec.get("use_ipv6", False)
+                    # Handle multiple ports
+                    ports = parse_ports_from_spec(db_tunnel.spec)
+                    if not ports:
+                        # Fallback to single port for backward compatibility
+                        listen_port = db_tunnel.spec.get("listen_port") or db_tunnel.spec.get("remote_port")
+                        if listen_port:
+                            ports = [int(listen_port) if isinstance(listen_port, (int, str)) and str(listen_port).isdigit() else listen_port]
                     
-                    if not listen_port:
+                    if not ports:
                         db_tunnel.status = "error"
-                        db_tunnel.error_message = "GOST requires listen_port or remote_port"
+                        db_tunnel.error_message = "GOST requires ports"
                         await db.commit()
                         await db.refresh(db_tunnel)
                         return db_tunnel
                     
+                    use_ipv6 = db_tunnel.spec.get("use_ipv6", False)
+                    remote_ip = db_tunnel.spec.get("remote_ip", foreign_ip)
+                    
                     gost_spec = {
-                        "listen_port": int(listen_port),
-                        "forward_to": f"{foreign_ip}:{remote_port}",
+                        "ports": ports,
+                        "remote_ip": remote_ip,
                         "type": db_tunnel.type,
                         "use_ipv6": use_ipv6
                     }
@@ -845,7 +887,7 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                         iran_node.node_metadata["api_address"] = f"http://{iran_node.node_metadata.get('ip_address', iran_node.fingerprint)}:{iran_node.node_metadata.get('api_port', 8888)}"
                         await db.commit()
                     
-                    logger.info(f"Applying GOST forwarding to Iran node {iran_node.id} for tunnel {db_tunnel.id}: {db_tunnel.type}://:{listen_port} -> {foreign_ip}:{remote_port}")
+                    logger.info(f"Applying GOST forwarding to Iran node {iran_node.id} for tunnel {db_tunnel.id}: {db_tunnel.type} with ports {ports} -> {remote_ip}")
                     response = await client.send_to_node(
                         node_id=iran_node.id,
                         endpoint="/api/agent/tunnels/apply",
@@ -868,32 +910,48 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     
                     logger.info(f"Successfully applied GOST forwarding to Iran node for tunnel {db_tunnel.id}")
                 else:
-                    listen_port = db_tunnel.spec.get("listen_port")
+                    # Handle multiple ports for panel-side GOST forwarding
+                    ports = parse_ports_from_spec(db_tunnel.spec)
+                    if not ports:
+                        # Fallback to single port for backward compatibility
+                        listen_port = db_tunnel.spec.get("listen_port")
+                        if listen_port:
+                            ports = [int(listen_port) if isinstance(listen_port, (int, str)) and str(listen_port).isdigit() else listen_port]
+                    
                     forward_to = db_tunnel.spec.get("forward_to")
-                    
-                    if not forward_to:
-                        from app.utils import format_address_port
-                        remote_ip = db_tunnel.spec.get("remote_ip", "127.0.0.1")
-                        remote_port = db_tunnel.spec.get("remote_port", 8080)
-                        forward_to = format_address_port(remote_ip, remote_port)
-                    
-                    panel_port = listen_port or db_tunnel.spec.get("remote_port")
+                    remote_ip = db_tunnel.spec.get("remote_ip", "127.0.0.1")
                     use_ipv6 = db_tunnel.spec.get("use_ipv6", False)
                     
-                    if panel_port and forward_to and hasattr(request.app.state, 'gost_forwarder'):
+                    if not ports:
+                        db_tunnel.status = "error"
+                        db_tunnel.error_message = "GOST requires ports"
+                        await db.commit()
+                        await db.refresh(db_tunnel)
+                        return db_tunnel
+                    
+                    if ports and hasattr(request.app.state, 'gost_forwarder'):
                         try:
-                            logger.info(f"Starting gost forwarding on panel for tunnel {db_tunnel.id}: {db_tunnel.type}://:{panel_port} -> {forward_to}, use_ipv6={use_ipv6}")
-                            request.app.state.gost_forwarder.start_forward(
-                                tunnel_id=db_tunnel.id,
-                                local_port=int(panel_port),
-                                forward_to=forward_to,
-                                tunnel_type=db_tunnel.type,
-                                use_ipv6=bool(use_ipv6)
-                            )
+                            # Start forwarding for each port
+                            for port in ports:
+                                port_num = int(port) if isinstance(port, (int, str)) and str(port).isdigit() else port
+                                if not forward_to:
+                                    from app.utils import format_address_port
+                                    forward_to_port = format_address_port(remote_ip, port_num)
+                                else:
+                                    forward_to_port = forward_to
+                                
+                                tunnel_id_for_port = f"{db_tunnel.id}_{port_num}" if len(ports) > 1 else db_tunnel.id
+                                logger.info(f"Starting gost forwarding on panel for tunnel {db_tunnel.id}: {db_tunnel.type}://:{port_num} -> {forward_to_port}, use_ipv6={use_ipv6}")
+                                request.app.state.gost_forwarder.start_forward(
+                                    tunnel_id=tunnel_id_for_port,
+                                    local_port=port_num,
+                                    forward_to=forward_to_port,
+                                    tunnel_type=db_tunnel.type,
+                                    use_ipv6=bool(use_ipv6)
+                                )
+                            
                             time.sleep(2)
-                            if not request.app.state.gost_forwarder.is_forwarding(db_tunnel.id):
-                                raise RuntimeError("Gost process started but is not running")
-                            logger.info(f"Successfully started gost forwarding on panel for tunnel {db_tunnel.id}")
+                            logger.info(f"Successfully started gost forwarding on panel for tunnel {db_tunnel.id} with {len(ports)} ports")
                         except Exception as e:
                             error_msg = str(e)
                             logger.error(f"Failed to start gost forwarding on panel for tunnel {db_tunnel.id}: {error_msg}", exc_info=True)
@@ -904,9 +962,9 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                             return db_tunnel
                     else:
                         missing = []
-                        if not panel_port:
-                            missing.append("panel_port")
-                        if not forward_to:
+                        if not ports:
+                            missing.append("ports")
+                        if not forward_to and not remote_ip:
                             missing.append("forward_to")
                         if not hasattr(request.app.state, 'gost_forwarder'):
                             missing.append("gost_forwarder")
