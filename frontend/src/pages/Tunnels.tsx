@@ -380,13 +380,41 @@ const Tunnels = () => {
                     </div>
 
                     {/* Transmission Type and Core Port */}
-                    <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400 mb-2">
-                      {tunnel.type && tunnel.type.toLowerCase() !== tunnel.core.toLowerCase() && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-medium">Transmission:</span>
-                          <span className="text-gray-700 dark:text-gray-300 uppercase">{tunnel.type}</span>
-                        </div>
-                      )}
+                    <div className="flex items-center gap-3 mb-2">
+                      {(() => {
+                        let transmissionType = null
+                        if (tunnel.core === 'chisel') {
+                          transmissionType = 'TCP'
+                        } else if (tunnel.core === 'rathole') {
+                          const transport = tunnel.spec?.transport || tunnel.spec?.type || 'tcp'
+                          transmissionType = transport.toUpperCase()
+                        } else if (tunnel.type && tunnel.type.toLowerCase() !== tunnel.core.toLowerCase()) {
+                          transmissionType = tunnel.type.toUpperCase()
+                        }
+                        
+                        if (!transmissionType) return null
+                        
+                        const getTransmissionBadge = () => {
+                          const typeColors: Record<string, { bg: string; text: string; border: string }> = {
+                            TCP: { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-800 dark:text-green-200', border: 'border-green-300 dark:border-green-700' },
+                            UDP: { bg: 'bg-yellow-100 dark:bg-yellow-900/30', text: 'text-yellow-800 dark:text-yellow-200', border: 'border-yellow-300 dark:border-yellow-700' },
+                            WS: { bg: 'bg-pink-100 dark:bg-pink-900/30', text: 'text-pink-800 dark:text-pink-200', border: 'border-pink-300 dark:border-pink-700' },
+                            WSS: { bg: 'bg-pink-100 dark:bg-pink-900/30', text: 'text-pink-800 dark:text-pink-200', border: 'border-pink-300 dark:border-pink-700' },
+                            GRPC: { bg: 'bg-teal-100 dark:bg-teal-900/30', text: 'text-teal-800 dark:text-teal-200', border: 'border-teal-300 dark:border-teal-700' },
+                            TCPMUX: { bg: 'bg-violet-100 dark:bg-violet-900/30', text: 'text-violet-800 dark:text-violet-200', border: 'border-violet-300 dark:border-violet-700' },
+                          }
+                          return typeColors[transmissionType] || { bg: 'bg-gray-100 dark:bg-gray-700', text: 'text-gray-800 dark:text-gray-200', border: 'border-gray-300 dark:border-gray-600' }
+                        }
+                        
+                        const transmissionBadge = getTransmissionBadge()
+                        return (
+                          <span
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide border ${transmissionBadge.bg} ${transmissionBadge.text} ${transmissionBadge.border} shrink-0`}
+                          >
+                            {transmissionType}
+                          </span>
+                        )
+                      })()}
                       {(() => {
                         let corePort = null
                         if (tunnel.core === 'rathole') {
@@ -404,14 +432,14 @@ const Tunnels = () => {
                           }
                           if (!corePort) corePort = '23333'
                         } else if (tunnel.core === 'chisel') {
-                          corePort = tunnel.spec?.server_port || tunnel.spec?.control_port
+                          corePort = tunnel.spec?.control_port || tunnel.spec?.server_port
                         } else if (tunnel.core === 'backhaul') {
                           corePort = tunnel.spec?.control_port || tunnel.spec?.public_port || '3080'
                         } else if (tunnel.core === 'frp') {
                           corePort = tunnel.spec?.bind_port || '7000'
                         }
                         return corePort ? (
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
                             <span className="font-medium">Core Port:</span>
                             <span className="text-gray-700 dark:text-gray-300 font-mono">{corePort}</span>
                           </div>
