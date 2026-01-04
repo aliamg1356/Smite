@@ -371,7 +371,7 @@ class TelegramBot:
                 await update.message.reply_text(self.t(user_id, "access_denied"), reply_markup=reply_markup)
                 return
             
-            await self.show_main_menu(update.message)
+            await update.message.reply_text(self.t(user_id, "welcome"), reply_markup=reply_markup)
         except Exception as e:
             logger.error(f"Error in cmd_start: {e}", exc_info=True)
             try:
