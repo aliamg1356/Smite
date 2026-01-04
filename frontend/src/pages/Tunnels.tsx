@@ -1012,10 +1012,32 @@ const AddTunnelModal = ({ nodes, servers, onClose, onSuccess }: AddTunnelModalPr
         }
         spec = buildBackhaulSpec(updatedBackhaulState, backhaulAdvanced)
         spec.use_ipv6 = formData.use_ipv6 || false
-        // Override ports with comma-separated input if customPorts is empty
-        if (!backhaulAdvanced.customPorts || backhaulAdvanced.customPorts.trim() === '') {
-          const targetHost = spec.target_host || '127.0.0.1'
-          spec.ports = ports.map(p => `${p}=${targetHost}:${p}`)
+        // buildBackhaulSpec should already build ports array from public_port (formData.ports)
+        // Verify ports were built correctly - if not, build them from parsed ports
+        if (!spec.ports || !Array.isArray(spec.ports) || spec.ports.length === 0) {
+          // buildBackhaulSpec didn't build ports, so build them from formData.ports
+          if (backhaulAdvanced.customPorts && backhaulAdvanced.customPorts.trim()) {
+            // Use customPorts if provided
+            spec.ports = backhaulAdvanced.customPorts
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean)
+          } else if (ports.length > 0) {
+            // Build from parsed ports (numbers) - format: "port=targetHost:port"
+            const targetHost = spec.target_host || '127.0.0.1'
+            const listenIp = spec.listen_ip || updatedBackhaulState.listen_ip || '0.0.0.0'
+            spec.ports = ports.map(p => {
+              // Format: "port=targetHost:port" or "listenIp:port=targetHost:port" if listenIp is set
+              const listenPart = listenIp !== '0.0.0.0' ? `${listenIp}:${p}` : `${p}`
+              return `${listenPart}=${targetHost}:${p}`
+            })
+          }
+        }
+        // Ensure ports array is properly formatted and has all ports
+        if (spec.ports && Array.isArray(spec.ports) && spec.ports.length > 0) {
+          console.log('Backhaul tunnel creation - final ports:', spec.ports, 'count:', spec.ports.length)
+        } else {
+          console.warn('Backhaul tunnel creation - no ports found! formData.ports:', formData.ports, 'publicPorts:', updatedBackhaulState.public_port)
         }
         tunnelType = backhaulState.transport
       }
