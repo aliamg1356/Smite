@@ -1444,6 +1444,57 @@ async def apply_tunnel(tunnel_id: str, request: Request, db: AsyncSession = Depe
                     if token:
                         client_spec["token"] = token
                 
+                if tunnel.core == "frp":
+                    bind_port = spec.get("bind_port")
+                    if not bind_port:
+                        import hashlib
+                        port_hash = int(hashlib.md5(tunnel.id.encode()).hexdigest()[:8], 16)
+                        bind_port = 7000 + (port_hash % 1000)
+                    
+                    token = spec.get("token")
+                    if not token:
+                        from app.utils import generate_token
+                        token = generate_token()
+                        spec["token"] = token
+                        tunnel.spec["token"] = token
+                        from sqlalchemy.orm.attributes import flag_modified
+                        flag_modified(tunnel, "spec")
+                        await db.commit()
+                        await db.refresh(tunnel)
+                    
+                    iran_node_ip = iran_node.node_metadata.get("ip_address")
+                    if not iran_node_ip:
+                        tunnel.status = "error"
+                        tunnel.error_message = "Iran node has no IP address"
+                        await db.commit()
+                        raise HTTPException(status_code=400, detail="Iran node has no IP address")
+                    
+                    server_spec = spec.copy()
+                    server_spec["bind_port"] = bind_port
+                    server_spec["token"] = token
+                    
+                    client_spec = spec.copy()
+                    client_spec["server_addr"] = iran_node_ip
+                    client_spec["server_port"] = bind_port
+                    client_spec["token"] = token
+                    tunnel_type = tunnel.type.lower() if tunnel.type else "tcp"
+                    if tunnel_type not in ["tcp", "udp"]:
+                        tunnel_type = "tcp"
+                    client_spec["type"] = tunnel_type
+                    
+                    ports = spec.get("ports", [])
+                    if not ports:
+                        local_port = spec.get("local_port")
+                        remote_port = spec.get("remote_port") or spec.get("listen_port")
+                        if remote_port and local_port:
+                            client_spec["ports"] = [{"local": int(local_port), "remote": int(remote_port)}]
+                        elif remote_port:
+                            client_spec["ports"] = [{"local": int(remote_port), "remote": int(remote_port)}]
+                        elif local_port:
+                            client_spec["ports"] = [{"local": int(local_port), "remote": int(local_port)}]
+                    else:
+                        client_spec["ports"] = ports
+                
                 if not iran_node.node_metadata.get("api_address"):
                     iran_node.node_metadata["api_address"] = f"http://{iran_node.node_metadata.get('ip_address', iran_node.fingerprint)}:{iran_node.node_metadata.get('api_port', 8888)}"
                     await db.commit()
@@ -1456,7 +1507,7 @@ async def apply_tunnel(tunnel_id: str, request: Request, db: AsyncSession = Depe
                         "tunnel_id": tunnel.id,
                         "core": tunnel.core,
                         "type": tunnel.type,
-                        "spec": server_spec if tunnel.core == "backhaul" else spec
+                        "spec": server_spec if tunnel.core in ["backhaul", "frp"] else spec
                     }
                 )
                 
@@ -1479,7 +1530,7 @@ async def apply_tunnel(tunnel_id: str, request: Request, db: AsyncSession = Depe
                         "tunnel_id": tunnel.id,
                         "core": tunnel.core,
                         "type": tunnel.type,
-                        "spec": client_spec if tunnel.core == "backhaul" else spec
+                        "spec": client_spec if tunnel.core in ["backhaul", "frp"] else spec
                     }
                 )
                 
