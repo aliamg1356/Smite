@@ -200,7 +200,6 @@ class FrpServerManager:
             
             logger.info(f"Stopped FRP server for tunnel {tunnel_id}")
         
-        # Clean up config file
         if tunnel_id in self.server_configs:
             config_file = Path(self.server_configs[tunnel_id].get("config_file", ""))
             if config_file.exists():
@@ -210,7 +209,6 @@ class FrpServerManager:
                     pass
             del self.server_configs[tunnel_id]
         
-        # Also clean up old TOML config files if they exist
         old_toml_config = self.config_dir / f"frps_{tunnel_id}.toml"
         if old_toml_config.exists():
             try:

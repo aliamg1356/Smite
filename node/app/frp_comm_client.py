@@ -80,14 +80,11 @@ serverPort: {server_port}
   token: "{token}"
 """
             
-            # Use node_id to create unique proxy name (or fallback if node_id not provided)
             # FRP proxy names should be alphanumeric and reasonably short
             if node_id:
-                # Remove hyphens and use first 12 chars of node_id for proxy name
                 clean_id = node_id.replace("-", "")[:12]
                 proxy_name = f"node_{clean_id}"
             else:
-                # Fallback: use remote_port if available, or default
                 if self.remote_port:
                     proxy_name = f"node_{self.remote_port}"
                 else:

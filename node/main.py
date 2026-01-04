@@ -48,7 +48,6 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Could not register with panel: {e}")
             logger.warning("Node will continue running but manual registration may be needed")
         
-        # Start periodic registration loop
         registration_task = asyncio.create_task(registration_loop(h2_client))
         app.state.registration_task = registration_task
     except Exception as e:

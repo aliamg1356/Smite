@@ -357,7 +357,6 @@ async def _restore_node_tunnels():
                     client_spec = tunnel.spec.copy() if tunnel.spec else {}
                     client_spec["mode"] = "client"
                     
-                    # Prepare configs based on tunnel type (same logic as create_tunnel)
                     if tunnel.core == "rathole":
                         transport = server_spec.get("transport") or server_spec.get("type") or "tcp"
                         proxy_port = server_spec.get("remote_port") or server_spec.get("listen_port")
@@ -370,7 +369,6 @@ async def _restore_node_tunnels():
                         from app.utils import parse_address_port
                         _, control_port, _ = parse_address_port(remote_addr)
                         if not control_port:
-                            # Generate unique port based on tunnel_id hash to avoid conflicts
                             import hashlib
                             port_hash = int(hashlib.md5(tunnel.id.encode()).hexdigest()[:8], 16)
                             control_port = 23333 + (port_hash % 1000)  # Ports 23333-24332
@@ -388,7 +386,6 @@ async def _restore_node_tunnels():
                             logger.warning(f"Tunnel {tunnel.id}: Iran node has no IP address, skipping")
                             continue
                         transport_lower = transport.lower()
-                        # For WebSocket transports, remote_addr needs protocol prefix
                         if transport_lower in ("websocket", "ws"):
                             use_tls = bool(server_spec.get("websocket_tls") or server_spec.get("tls"))
                             protocol = "wss://" if use_tls else "ws://"
@@ -417,7 +414,6 @@ async def _restore_node_tunnels():
                         if not iran_node_ip:
                             logger.warning(f"Tunnel {tunnel.id}: Iran node has no IP address, skipping")
                             continue
-                        # Generate unique control port to avoid conflicts
                         import hashlib
                         port_hash = int(hashlib.md5(tunnel.id.encode()).hexdigest()[:8], 16)
                         server_control_port = server_spec.get("control_port") or (int(listen_port) + 10000 + (port_hash % 1000))
@@ -442,7 +438,6 @@ async def _restore_node_tunnels():
                         client_spec["local_addr"] = local_addr
                     
                     elif tunnel.core == "frp":
-                        # Generate unique bind_port to avoid conflicts
                         import hashlib
                         port_hash = int(hashlib.md5(tunnel.id.encode()).hexdigest()[:8], 16)
                         bind_port = server_spec.get("bind_port") or (7000 + (port_hash % 1000))
@@ -470,7 +465,6 @@ async def _restore_node_tunnels():
                     
                     elif tunnel.core == "backhaul":
                         transport = server_spec.get("transport") or server_spec.get("type") or "tcp"
-                        # Generate unique control_port to avoid conflicts
                         import hashlib
                         port_hash = int(hashlib.md5(tunnel.id.encode()).hexdigest()[:8], 16)
                         control_port = server_spec.get("control_port") or server_spec.get("listen_port") or (3080 + (port_hash % 1000))
@@ -511,7 +505,6 @@ async def _restore_node_tunnels():
                         if token:
                             client_spec["token"] = token
                     
-                    # Apply server config to iran node (Iran = SERVER)
                     if not iran_node.node_metadata.get("api_address"):
                         iran_node.node_metadata["api_address"] = f"http://{iran_node.node_metadata.get('ip_address', iran_node.fingerprint)}:{iran_node.node_metadata.get('api_port', 8888)}"
                         await db.commit()
@@ -533,7 +526,6 @@ async def _restore_node_tunnels():
                         logger.error(f"Failed to restore tunnel {tunnel.id} on iran node {iran_node.id}: {error_msg}")
                         continue
                     
-                    # Apply client config to foreign node (Foreign = CLIENT)
                     if not foreign_node.node_metadata.get("api_address"):
                         foreign_node.node_metadata["api_address"] = f"http://{foreign_node.node_metadata.get('ip_address', foreign_node.fingerprint)}:{foreign_node.node_metadata.get('api_port', 8888)}"
                         await db.commit()

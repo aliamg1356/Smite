@@ -40,14 +40,12 @@ class GostForwarder:
                 self.stop_forward(tunnel_id)
                 time.sleep(0.5)
             
-            # Parse forward_to address (handles IPv4, IPv6, and hostnames)
             forward_host, forward_port, forward_is_ipv6 = parse_address_port(forward_to)
             if forward_port is None:
                 forward_port = 8080
             
             target_addr = format_address_port(forward_host, forward_port)
             
-            # Determine listen address based on IPv6 preference
             if use_ipv6:
                 listen_addr = f"[::]:{local_port}"
             else:

@@ -168,17 +168,9 @@ class PanelClient:
                 remote_port = config.get("remote_port")
                 
                 if remote_port:
-                    # Report FRP status via HTTP (last HTTP call)
                     logger.info(f"[HTTP] Reporting FRP status to panel (last HTTP call before switching to FRP)")
                     await self._report_frp_status(remote_port)
                     
-                    # After reporting, switch to FRP for all future communication
-                    # The panel will connect to us via FRP, but we also need to connect to panel via FRP
-                    # For node->panel communication, we need a reverse tunnel from panel to node
-                    # Actually, wait - FRP client tunnels node's API to panel, so panel->node uses FRP
-                    # But node->panel still needs a way. Let me check the architecture...
-                    # Actually, the node doesn't actively call the panel after registration except for status updates
-                    # The main communication is panel->node, which will use FRP
                     logger.info(f"[FRP] FRP client connected successfully. All panel->node communication will now use FRP tunnel (remote_port={remote_port})")
                     self.using_frp = True
                 else:

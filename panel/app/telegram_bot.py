@@ -46,8 +46,8 @@ class TelegramBot:
         self.backup_enabled = False
         self.backup_interval = 60
         self.backup_interval_unit = "minutes"
-        self.user_languages: Dict[str, str] = {}  # user_id -> language (en/fa) - use string keys
-        self.user_states: Dict[int, Dict] = {}  # user_id -> state data
+        self.user_languages: Dict[str, str] = {}
+        self.user_states: Dict[int, Dict] = {}
         self.language_file = Path("/tmp/telegram_bot_languages.json")
         self._load_languages()
     
@@ -78,7 +78,6 @@ class TelegramBot:
                 import json
                 with open(self.language_file, 'r') as f:
                     data = json.load(f)
-                    # Convert keys to strings
                     self.user_languages = {str(k): v for k, v in data.items()}
         except Exception as e:
             logger.warning(f"Failed to load languages: {e}")
@@ -205,7 +204,6 @@ class TelegramBot:
         try:
             self.application = Application.builder().token(self.bot_token).build()
             
-            # Conversation handler for adding nodes
             add_node_conv = ConversationHandler(
                 entry_points=[CallbackQueryHandler(self.add_node_start, pattern="^add_node_")],
                 states={
@@ -216,7 +214,6 @@ class TelegramBot:
                 fallbacks=[CallbackQueryHandler(self.cancel_operation, pattern="^cancel$")],
             )
             
-            # Conversation handler for removing nodes
             remove_node_conv = ConversationHandler(
                 entry_points=[CallbackQueryHandler(self.remove_node_start, pattern="^remove_node_")],
                 states={
@@ -225,7 +222,6 @@ class TelegramBot:
                 fallbacks=[CallbackQueryHandler(self.cancel_operation, pattern="^cancel$")],
             )
             
-            # Conversation handler for creating tunnels
             create_tunnel_conv = ConversationHandler(
                 entry_points=[CallbackQueryHandler(self.create_tunnel_start, pattern="^create_tunnel$")],
                 states={
@@ -241,7 +237,6 @@ class TelegramBot:
                 fallbacks=[CallbackQueryHandler(self.cancel_operation, pattern="^cancel$")],
             )
             
-            # Conversation handler for removing tunnels
             remove_tunnel_conv = ConversationHandler(
                 entry_points=[CallbackQueryHandler(self.remove_tunnel_start, pattern="^remove_tunnel$")],
                 states={
@@ -272,7 +267,6 @@ class TelegramBot:
             await self.application.initialize()
             await self.application.start()
             
-            # Use drop_pending_updates to avoid conflicts
             await self.application.updater.start_polling(drop_pending_updates=True)
             
             await self.start_backup_task()
@@ -281,7 +275,6 @@ class TelegramBot:
             return True
         except Exception as e:
             logger.error(f"Failed to start Telegram bot: {e}", exc_info=True)
-            # Clean up on failure
             await self.stop()
             return False
     
@@ -460,7 +453,6 @@ Use buttons in messages to interact with nodes and tunnels."""
         
         await update.message.reply_text(help_text)
     
-    # Node management
     async def add_node_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start adding a node"""
         try:
@@ -591,10 +583,7 @@ Use buttons in messages to interact with nodes and tunnels."""
             keyboard.append([InlineKeyboardButton(self.t(query.from_user.id, "cancel"), callback_data="cancel")])
             
             reply_markup = InlineKeyboardMarkup(keyboard)
-            if hasattr(message, 'edit_message_text'):
-                await message.edit_message_text(self.t(user_id, "select_node_to_remove"), reply_markup=reply_markup)
-            else:
-                await message.reply_text(self.t(user_id, "select_node_to_remove"), reply_markup=reply_markup)
+            await query.edit_message_text(self.t(query.from_user.id, "select_node_to_remove"), reply_markup=reply_markup)
             return WAITING_FOR_NODE_NAME
     
     async def remove_node_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -621,7 +610,6 @@ Use buttons in messages to interact with nodes and tunnels."""
         
         return ConversationHandler.END
     
-    # Tunnel management
     async def create_tunnel_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start creating a tunnel"""
         try:
@@ -745,18 +733,33 @@ Use buttons in messages to interact with nodes and tunnels."""
         self.user_states[user_id]["ports"] = ports
         core = self.user_states[user_id]["core"]
         
-        # For Rathole, ask for token first
         if core == "rathole":
-            self.user_states[user_id]["step"] = "token"
-            cancel_btn = InlineKeyboardButton(self.t(user_id, "cancel"), callback_data="cancel")
-            reply_markup = InlineKeyboardMarkup([[cancel_btn]])
-            await update.message.reply_text("Enter Rathole token:", reply_markup=reply_markup)
-            return WAITING_FOR_TUNNEL_TOKEN
+            self.user_states[user_id]["step"] = "iran_node"
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(select(Node))
+                nodes = result.scalars().all()
+                iran_nodes = [n for n in nodes if n.node_metadata.get("role") == "iran"]
+                
+                if not iran_nodes:
+                    await update.message.reply_text("No Iran nodes found. Please add an Iran node first.")
+                    del self.user_states[user_id]
+                    await self.show_main_menu(update.message)
+                    return ConversationHandler.END
+                
+                keyboard = []
+                for node in iran_nodes:
+                    keyboard.append([InlineKeyboardButton(
+                        f"🇮🇷 {node.name}",
+                        callback_data=f"iran_node_{node.id}"
+                    )])
+                keyboard.append([InlineKeyboardButton(self.t(user_id, "cancel"), callback_data="cancel")])
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await update.message.reply_text(self.t(user_id, "select_iran_node"), reply_markup=reply_markup)
+                return WAITING_FOR_TUNNEL_IRAN_NODE
         
-        # For cores that need nodes, ask for nodes
         if core in ["backhaul", "frp", "chisel"]:
             self.user_states[user_id]["step"] = "iran_node"
-            # Get Iran nodes
             async with AsyncSessionLocal() as session:
                 result = await session.execute(select(Node))
                 nodes = result.scalars().all()
@@ -780,7 +783,6 @@ Use buttons in messages to interact with nodes and tunnels."""
                 await update.message.reply_text(self.t(user_id, "select_iran_node"), reply_markup=reply_markup)
                 return WAITING_FOR_TUNNEL_IRAN_NODE
         else:
-            # For GOST, ask for remote IP
             self.user_states[user_id]["step"] = "remote_ip"
             cancel_btn = InlineKeyboardButton(self.t(user_id, "cancel"), callback_data="cancel")
             reply_markup = InlineKeyboardMarkup([[cancel_btn]])
@@ -801,7 +803,6 @@ Use buttons in messages to interact with nodes and tunnels."""
         self.user_states[user_id]["token"] = token
         self.user_states[user_id]["step"] = "iran_node"
         
-        # Get Iran nodes
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(Node))
             nodes = result.scalars().all()
@@ -874,14 +875,11 @@ Use buttons in messages to interact with nodes and tunnels."""
         foreign_node_id = query.data.replace("foreign_node_", "")
         state = self.user_states[user_id]
         
-        # Build spec based on core
         spec = {"ports": state["ports"]}
         
-        # Add token for Rathole
         if state["core"] == "rathole" and "token" in state:
             spec["token"] = state["token"]
         
-        # Add remote_ip for GOST
         if state["core"] == "gost":
             spec["remote_ip"] = state.get("remote_ip", "127.0.0.1")
         
@@ -1019,7 +1017,6 @@ Use buttons in messages to interact with nodes and tunnels."""
         await self.show_main_menu(query.message)
         return ConversationHandler.END
     
-    # Stats and info
     async def cmd_nodes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /nodes command"""
         if not self.is_admin(update.effective_user.id):
@@ -1101,56 +1098,79 @@ Use buttons in messages to interact with nodes and tunnels."""
             backup_dir = Path("/tmp/smite_backup")
             backup_dir.mkdir(exist_ok=True)
             
-            db_path = Path("./data/smite.db")
+            panel_root = Path(os.getcwd())
+            if not (panel_root / "data").exists():
+                for possible_root in [Path("/opt/smite"), Path(__file__).parent.parent.parent]:
+                    if (possible_root / "data").exists():
+                        panel_root = possible_root
+                        break
+            
+            db_path = panel_root / "data" / "smite.db"
             if db_path.exists():
                 shutil.copy2(db_path, backup_dir / "smite.db")
             
-            env_path = Path(".env")
+            env_path = panel_root / ".env"
             if env_path.exists():
                 shutil.copy2(env_path, backup_dir / ".env")
             
-            docker_compose = Path("docker-compose.yml")
+            docker_compose = panel_root / "docker-compose.yml"
             if docker_compose.exists():
                 shutil.copy2(docker_compose, backup_dir / "docker-compose.yml")
             
-            certs_dir = Path("./certs")
+            certs_dir = panel_root / "certs"
             if certs_dir.exists():
                 shutil.copytree(certs_dir, backup_dir / "certs", dirs_exist_ok=True)
             
             node_cert_path = Path(settings.node_cert_path)
             if not node_cert_path.is_absolute():
-                node_cert_path = Path(os.getcwd()) / node_cert_path
+                node_cert_path = panel_root / node_cert_path
             if node_cert_path.exists():
                 (backup_dir / "node_certs").mkdir(exist_ok=True)
                 shutil.copy2(node_cert_path, backup_dir / "node_certs" / "ca.crt")
             
             node_key_path = Path(settings.node_key_path)
             if not node_key_path.is_absolute():
-                node_key_path = Path(os.getcwd()) / node_key_path
+                node_key_path = panel_root / node_key_path
             if node_key_path.exists():
                 (backup_dir / "node_certs").mkdir(exist_ok=True)
                 shutil.copy2(node_key_path, backup_dir / "node_certs" / "ca.key")
             
             server_cert_path = Path(settings.node_server_cert_path)
             if not server_cert_path.is_absolute():
-                server_cert_path = Path(os.getcwd()) / server_cert_path
+                server_cert_path = panel_root / server_cert_path
             if server_cert_path.exists():
                 (backup_dir / "server_certs").mkdir(exist_ok=True)
                 shutil.copy2(server_cert_path, backup_dir / "server_certs" / "ca-server.crt")
             
             server_key_path = Path(settings.node_server_key_path)
             if not server_key_path.is_absolute():
-                server_key_path = Path(os.getcwd()) / server_key_path
+                server_key_path = panel_root / server_key_path
             if server_key_path.exists():
                 (backup_dir / "server_certs").mkdir(exist_ok=True)
                 shutil.copy2(server_key_path, backup_dir / "server_certs" / "ca-server.key")
             
-            data_dir = Path("./data")
+            data_dir = panel_root / "data"
             if data_dir.exists():
                 (backup_dir / "data").mkdir(exist_ok=True)
                 for item in data_dir.iterdir():
                     if item.is_file() and item.suffix in ['.json', '.yaml', '.toml']:
                         shutil.copy2(item, backup_dir / "data" / item.name)
+            
+            from app.config import settings
+            if settings.https_enabled and settings.panel_domain:
+                nginx_dir = panel_root / "nginx"
+                if nginx_dir.exists():
+                    shutil.copytree(nginx_dir, backup_dir / "nginx", dirs_exist_ok=True)
+                
+                letsencrypt_dir = Path("/etc/letsencrypt")
+                if letsencrypt_dir.exists():
+                    domain_dir = letsencrypt_dir / "live" / settings.panel_domain
+                    if domain_dir.exists():
+                        (backup_dir / "letsencrypt" / "live" / settings.panel_domain).mkdir(parents=True, exist_ok=True)
+                        for cert_file in ["fullchain.pem", "privkey.pem", "chain.pem", "cert.pem"]:
+                            cert_path = domain_dir / cert_file
+                            if cert_path.exists():
+                                shutil.copy2(cert_path, backup_dir / "letsencrypt" / "live" / settings.panel_domain / cert_file)
             
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             backup_file = f"/tmp/smite_backup_{timestamp}.zip"
@@ -1175,8 +1195,14 @@ Use buttons in messages to interact with nodes and tunnels."""
             if not self.is_admin(update.effective_user.id):
                 return
             
-            text = update.message.text
+            # Skip if user is in a conversation (let conversation handlers handle it)
             user_id = update.effective_user.id
+            if user_id in self.user_states:
+                return
+            
+            text = update.message.text
+            if not text:
+                return
             
             # Check if it's a keyboard button
             if "📊" in text and self.t(user_id, "node_stats") in text:

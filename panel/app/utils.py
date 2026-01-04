@@ -1,6 +1,8 @@
 """Utility functions for address parsing and validation"""
 import ipaddress
 import re
+import secrets
+import string
 from typing import Tuple, Optional
 
 
@@ -114,4 +116,18 @@ def is_valid_ipv6_address(address: str) -> bool:
         return True
     except (ValueError, ipaddress.AddressValueError):
         return False
+
+
+def generate_token(length: int = 16) -> str:
+    """
+    Generate a random secure token.
+    
+    Args:
+        length: Length of the token (default: 16)
+        
+    Returns:
+        Random token string
+    """
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
 

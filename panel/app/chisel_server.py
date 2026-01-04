@@ -49,11 +49,9 @@ class ChiselServerManager:
                 "--reverse"
             ]
             
-            # Optional: Add authentication
             if auth:
                 cmd.extend(["--auth", auth])
             
-            # Optional: Add fingerprint
             if fingerprint:
                 cmd.extend(["--fingerprint", fingerprint])
             
@@ -89,7 +87,6 @@ class ChiselServerManager:
                     start_new_session=True
                 )
             
-            # Store log file handle to keep it open (prevents subprocess from exiting)
             self.active_servers[f"{tunnel_id}_log"] = log_f
             self.active_servers[tunnel_id] = proc
             
@@ -118,14 +115,12 @@ class ChiselServerManager:
                         del self.server_configs[tunnel_id]
                 raise RuntimeError(error_msg)
             
-            # Verify server is actually listening
             try:
                 import socket
                 max_retries = 3
                 port_listening = False
                 for attempt in range(max_retries):
                     time.sleep(0.5)  # Give it time to bind
-                    # Always check IPv4 since panel listens on 0.0.0.0
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(1)
                     result = sock.connect_ex(('127.0.0.1', server_port))

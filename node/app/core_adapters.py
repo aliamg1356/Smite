@@ -93,10 +93,8 @@ class RatholeAdapter:
             bind_addr = spec.get('bind_addr', '0.0.0.0:23333')
             token = spec.get('token', '').strip()
             
-            # Support multiple ports
             ports = spec.get('ports', [])
             if not ports:
-                # Fallback to single port for backward compatibility
                 proxy_port = spec.get('proxy_port') or spec.get('remote_port') or spec.get('listen_port')
                 if proxy_port:
                     ports = [int(proxy_port) if isinstance(proxy_port, (int, str)) and str(proxy_port).isdigit() else proxy_port]
@@ -126,7 +124,6 @@ type = "websocket"
                 if websocket_tls:
                     config += "tls = true\n"
             
-            # Create multiple service sections for multiple ports
             for i, port in enumerate(ports):
                 port_num = int(port) if isinstance(port, (int, str)) and str(port).isdigit() else port
                 service_name = f"{tunnel_id}_{i}" if len(ports) > 1 else tunnel_id
@@ -353,28 +350,22 @@ class BackhaulAdapter:
                 else:
                     ports = []
             
-            # Ensure ports is a list of strings
             if isinstance(ports, list):
-                # Handle different port formats
                 processed_ports = []
                 for p in ports:
                     if not p:
                         continue
                     if isinstance(p, str):
-                        # Already a string, use as-is
                         processed_ports.append(p)
                     elif isinstance(p, (int, float)):
-                        # Number - convert to string
                         processed_ports.append(str(p))
                     elif isinstance(p, dict):
-                        # Dictionary format - convert to "port=host:port" format
                         local = p.get("local") or p.get("listen_port") or p.get("public_port")
                         target_host = p.get("target_host") or spec.get("target_host", "127.0.0.1")
                         target_port = p.get("target_port") or p.get("remote_port") or local
                         if local:
                             processed_ports.append(f"{local}={target_host}:{target_port}")
                     else:
-                        # Fallback: convert to string
                         processed_ports.append(str(p))
                 ports = processed_ports
             else:
@@ -901,10 +892,8 @@ class FrpAdapter:
             tunnel_type = spec.get('type', 'tcp').lower()
             local_ip = spec.get('local_ip', '127.0.0.1')
             
-            # Support multiple ports
             ports = spec.get('ports', [])
             if not ports:
-                # Fallback to single port for backward compatibility
                 local_port = spec.get('local_port')
                 remote_port = spec.get('remote_port') or spec.get('listen_port')
                 if remote_port and local_port:
@@ -940,13 +929,11 @@ serverPort: {server_port}
 """
             
             config_content += "\nproxies:\n"
-            # Create multiple proxy entries for multiple ports
             for i, port_config in enumerate(ports):
                 if isinstance(port_config, dict):
                     local_port = port_config.get('local')
                     remote_port = port_config.get('remote')
                 else:
-                    # If ports is a list of numbers, use same port for local and remote
                     local_port = remote_port = port_config
                 
                 proxy_name = f"{tunnel_id}_{i}" if len(ports) > 1 else tunnel_id
@@ -1094,10 +1081,8 @@ class GostAdapter:
             logger.info(f"GOST tunnel {tunnel_id} already exists, removing it first")
             self.remove(tunnel_id)
         
-        # Support multiple ports
         ports = spec.get('ports', [])
         if not ports:
-            # Fallback to single port for backward compatibility
             listen_port = spec.get('listen_port') or spec.get('remote_port')
             if listen_port:
                 ports = [int(listen_port) if isinstance(listen_port, (int, str)) and str(listen_port).isdigit() else listen_port]
@@ -1116,11 +1101,9 @@ class GostAdapter:
         binary_path = self._resolve_binary_path()
         cmd = [str(binary_path)]
         
-        # Add multiple -L flags for multiple ports
         for port in ports:
             port_num = int(port) if isinstance(port, (int, str)) and str(port).isdigit() else port
             
-            # Determine target address
             if forward_to:
                 forward_host, forward_port, forward_is_ipv6 = parse_address_port(forward_to)
                 if forward_port is None:

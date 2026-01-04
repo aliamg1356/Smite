@@ -143,12 +143,10 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
     
     logger.info(f"Creating tunnel: name={tunnel.name}, type={tunnel.type}, core={tunnel.core}, node_id={tunnel.node_id}")
     
-    # For Backhaul, log the ports received from frontend
     if tunnel.spec and tunnel.core == "backhaul":
         ports_received = tunnel.spec.get("ports", [])
         logger.info(f"Backhaul tunnel creation: received ports from frontend: {ports_received} (type: {type(ports_received)}, length: {len(ports_received) if isinstance(ports_received, list) else 'N/A'})")
     
-    # Parse ports from spec if provided (skip for Backhaul as it has its own format)
     if tunnel.spec and tunnel.core != "backhaul":
         ports = parse_ports_from_spec(tunnel.spec)
         if ports:
@@ -217,7 +215,6 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
     
     tunnel_node_id = tunnel.iran_node_id or tunnel.node_id or ""
     
-    # Store foreign_node_id and iran_node_id for reverse tunnels
     foreign_node_id_to_store = foreign_node.id if foreign_node else None
     iran_node_id_to_store = iran_node.id if iran_node else None
     
@@ -259,7 +256,6 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
             server_spec = db_tunnel.spec.copy() if db_tunnel.spec else {}
             server_spec["mode"] = "server"
             
-            # Ensure ports array is preserved in server_spec if it exists in db_tunnel.spec
             if "ports" in db_tunnel.spec and "ports" not in server_spec:
                 server_spec["ports"] = db_tunnel.spec.get("ports", [])
             
@@ -269,18 +265,23 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
             if db_tunnel.core == "rathole":
                 transport = server_spec.get("transport") or server_spec.get("type") or "tcp"
                 token = server_spec.get("token")
+                if not token:
+                    from app.utils import generate_token
+                    token = generate_token()
+                    server_spec["token"] = token
+                    db_tunnel.spec["token"] = token
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(db_tunnel, "spec")
                 
-                # Handle multiple ports
                 ports = parse_ports_from_spec(db_tunnel.spec)
                 if not ports:
-                    # Fallback to single port for backward compatibility
                     proxy_port = server_spec.get("remote_port") or server_spec.get("listen_port")
                     if proxy_port:
                         ports = [int(proxy_port) if isinstance(proxy_port, (int, str)) and str(proxy_port).isdigit() else proxy_port]
                 
-                if not ports or not token:
+                if not ports:
                     db_tunnel.status = "error"
-                    db_tunnel.error_message = "Rathole requires ports and token"
+                    db_tunnel.error_message = "Rathole requires ports"
                     await db.commit()
                     await db.refresh(db_tunnel)
                     return db_tunnel
@@ -325,10 +326,8 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     client_spec["websocket_tls"] = server_spec["tls"]
                 
             elif db_tunnel.core == "chisel":
-                # Handle multiple ports
                 ports = parse_ports_from_spec(db_tunnel.spec)
                 if not ports:
-                    # Fallback to single port for backward compatibility
                     listen_port = server_spec.get("listen_port") or server_spec.get("remote_port")
                     if listen_port:
                         ports = [int(listen_port) if isinstance(listen_port, (int, str)) and str(listen_port).isdigit() else listen_port]
@@ -352,18 +351,23 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 first_port = int(ports[0]) if isinstance(ports[0], (int, str)) and str(ports[0]).isdigit() else ports[0]
                 server_control_port = server_spec.get("control_port") or (int(first_port) + 10000 + (port_hash % 1000))
                 server_spec["server_port"] = server_control_port
-                server_spec["reverse_port"] = first_port  # Keep for backward compatibility
+                server_spec["reverse_port"] = first_port
                 auth = server_spec.get("auth")
-                if auth:
+                if not auth:
+                    from app.utils import generate_token
+                    auth = generate_token()
                     server_spec["auth"] = auth
+                    db_tunnel.spec["auth"] = auth
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(db_tunnel, "spec")
+                server_spec["auth"] = auth
                 fingerprint = server_spec.get("fingerprint")
                 if fingerprint:
                     server_spec["fingerprint"] = fingerprint
                 
                 client_spec["server_url"] = f"http://{iran_node_ip}:{server_control_port}"
-                client_spec["ports"] = ports  # Pass ports to client
-                if auth:
-                    client_spec["auth"] = auth
+                client_spec["ports"] = ports
+                client_spec["auth"] = auth
                 if fingerprint:
                     client_spec["fingerprint"] = fingerprint
                 
@@ -372,9 +376,15 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 port_hash = int(hashlib.md5(db_tunnel.id.encode()).hexdigest()[:8], 16)
                 bind_port = server_spec.get("bind_port") or (7000 + (port_hash % 1000))
                 token = server_spec.get("token")
-                server_spec["bind_port"] = bind_port
-                if token:
+                if not token:
+                    from app.utils import generate_token
+                    token = generate_token()
                     server_spec["token"] = token
+                    db_tunnel.spec["token"] = token
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(db_tunnel, "spec")
+                server_spec["bind_port"] = bind_port
+                server_spec["token"] = token
                 
                 iran_node_ip = iran_node.node_metadata.get("ip_address")
                 if not iran_node_ip:
@@ -385,21 +395,17 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     return db_tunnel
                 client_spec["server_addr"] = iran_node_ip
                 client_spec["server_port"] = bind_port
-                if token:
-                    client_spec["token"] = token
+                client_spec["token"] = token
                 tunnel_type = db_tunnel.type.lower() if db_tunnel.type else "tcp"
                 if tunnel_type not in ["tcp", "udp"]:
                     tunnel_type = "tcp"  # Default to tcp if invalid
                 client_spec["type"] = tunnel_type
                 local_ip = client_spec.get("local_ip") or iran_node_ip
                 
-                # Handle multiple ports
                 ports = parse_ports_from_spec(db_tunnel.spec)
                 if ports:
-                    # Convert list of port numbers to list of dicts with local and remote
                     client_spec["ports"] = [{"local": int(p), "remote": int(p)} for p in ports]
                 else:
-                    # Fallback to single port for backward compatibility
                     local_port = client_spec.get("local_port")
                     if not local_port:
                         local_port = db_tunnel.spec.get("listen_port") or db_tunnel.spec.get("remote_port") or bind_port
@@ -415,18 +421,20 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 control_port = server_spec.get("control_port") or server_spec.get("listen_port") or (3080 + (port_hash % 1000))
                 target_host = server_spec.get("target_host", "127.0.0.1")
                 token = server_spec.get("token")
+                if not token:
+                    from app.utils import generate_token
+                    token = generate_token()
+                    server_spec["token"] = token
+                    db_tunnel.spec["token"] = token
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(db_tunnel, "spec")
                 
-                # Handle multiple ports - Backhaul already has ports array in spec from frontend
-                # IMPORTANT: Read ports from server_spec first (which comes from db_tunnel.spec.copy())
-                # This ensures we get the ports that were sent from frontend and stored in database
                 ports = server_spec.get("ports", [])
                 if not ports:
-                    # Fallback to db_tunnel.spec if server_spec doesn't have ports
                     ports = db_tunnel.spec.get("ports", [])
                 logger.info(f"Backhaul tunnel {db_tunnel.id}: received ports from server_spec: {server_spec.get('ports')}, from db_tunnel.spec: {db_tunnel.spec.get('ports')}, final: {ports} (type: {type(ports)}, length: {len(ports) if isinstance(ports, list) else 'N/A'})")
                 
                 if not ports or (isinstance(ports, list) and len(ports) == 0):
-                    # Fallback to single port for backward compatibility
                     public_port = server_spec.get("public_port") or server_spec.get("remote_port") or server_spec.get("listen_port")
                     target_port = server_spec.get("target_port") or public_port
                     if not public_port:
@@ -441,36 +449,27 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     else:
                         ports = [str(public_port)]
                 else:
-                    # Ensure ports are in the correct format (list of strings like "8080=127.0.0.1:8080")
                     if isinstance(ports, list) and ports:
-                        # Process each port individually to handle different formats
                         processed_ports = []
                         for p in ports:
                             if not p:
                                 continue
                             if isinstance(p, str):
-                                # Already a string - check if it needs conversion
                                 if '=' in p:
-                                    # Already in correct format "port=host:port"
                                     processed_ports.append(p)
                                 elif p.isdigit():
-                                    # Just a port number - convert to format
                                     processed_ports.append(f"{p}={target_host}:{p}")
                                 else:
-                                    # Some other string format - use as-is
                                     processed_ports.append(p)
                             elif isinstance(p, int):
-                                # Number - convert to proper format
                                 processed_ports.append(f"{p}={target_host}:{p}")
                             elif isinstance(p, dict):
-                                # Dictionary format - extract and convert
                                 local = p.get("local") or p.get("listen_port") or p.get("public_port")
                                 tgt_host = p.get("target_host") or target_host
                                 tgt_port = p.get("target_port") or p.get("remote_port") or local
                                 if local:
                                     processed_ports.append(f"{local}={tgt_host}:{tgt_port}")
                             else:
-                                # Fallback: convert to string
                                 processed_ports.append(str(p))
                         ports = processed_ports
                 
@@ -481,12 +480,10 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 server_spec["transport"] = transport
                 server_spec["type"] = transport
                 server_spec["ports"] = ports
-                server_spec["mode"] = "server"  # Ensure mode is set
-                if token:
-                    server_spec["token"] = token
+                server_spec["mode"] = "server"
+                server_spec["token"] = token
                 
                 # CRITICAL: Update the database spec with processed ports so they're preserved
-                # This ensures when we read back from DB, all ports are there
                 if "ports" not in db_tunnel.spec:
                     db_tunnel.spec["ports"] = []
                 db_tunnel.spec["ports"] = ports.copy() if isinstance(ports, list) else ports
@@ -931,10 +928,8 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                         await db.refresh(db_tunnel)
                         return db_tunnel
                     
-                    # Handle multiple ports
                     ports = parse_ports_from_spec(db_tunnel.spec)
                     if not ports:
-                        # Fallback to single port for backward compatibility
                         listen_port = db_tunnel.spec.get("listen_port") or db_tunnel.spec.get("remote_port")
                         if listen_port:
                             ports = [int(listen_port) if isinstance(listen_port, (int, str)) and str(listen_port).isdigit() else listen_port]
@@ -984,10 +979,8 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     
                     logger.info(f"Successfully applied GOST forwarding to Iran node for tunnel {db_tunnel.id}")
                 else:
-                    # Handle multiple ports for panel-side GOST forwarding
                     ports = parse_ports_from_spec(db_tunnel.spec)
                     if not ports:
-                        # Fallback to single port for backward compatibility
                         listen_port = db_tunnel.spec.get("listen_port")
                         if listen_port:
                             ports = [int(listen_port) if isinstance(listen_port, (int, str)) and str(listen_port).isdigit() else listen_port]
@@ -1005,7 +998,6 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     
                     if ports and hasattr(request.app.state, 'gost_forwarder'):
                         try:
-                            # Start forwarding for each port
                             for port in ports:
                                 port_num = int(port) if isinstance(port, (int, str)) and str(port).isdigit() else port
                                 if not forward_to:
@@ -1353,7 +1345,6 @@ async def apply_tunnel(tunnel_id: str, request: Request, db: AsyncSession = Depe
             raise HTTPException(status_code=404, detail="No foreign node found. Please ensure at least one node has role='foreign' (set NODE_ROLE=foreign on the foreign node).")
         foreign_node = foreign_nodes[0]
         
-        # Verify node roles are correct
         if iran_node.node_metadata.get("role") != "iran":
             raise HTTPException(status_code=400, detail=f"Node {iran_node.id} is not an iran node (role={iran_node.node_metadata.get('role')}). Set NODE_ROLE=iran on the Iran node.")
         if foreign_node.node_metadata.get("role") != "foreign":
@@ -1376,19 +1367,15 @@ async def apply_tunnel(tunnel_id: str, request: Request, db: AsyncSession = Depe
                     server_spec["public_port"] = public_port
                     server_spec["listen_port"] = public_port
                     
-                    # Handle multiple ports - preserve the ports array from spec
                     # IMPORTANT: Read ports from spec (which is tunnel.spec.copy()) first
                     ports = spec.get("ports", [])
                     if not ports:
-                        # Fallback to tunnel.spec if spec doesn't have ports
                         ports = tunnel.spec.get("ports", [])
-                    # Ensure ports are in server_spec
                     if ports:
                         server_spec["ports"] = ports
                     logger.info(f"Backhaul tunnel update {tunnel.id}: received ports from spec: {spec.get('ports')}, from tunnel.spec: {tunnel.spec.get('ports')}, final: {ports} (type: {type(ports)}, length: {len(ports) if isinstance(ports, list) else 'N/A'})")
                     
                     if not ports or (isinstance(ports, list) and len(ports) == 0):
-                        # Fallback to single port for backward compatibility
                         target_port = spec.get("target_port") or public_port
                         if target_port:
                             target_addr = f"{target_host}:{target_port}"
@@ -1396,36 +1383,27 @@ async def apply_tunnel(tunnel_id: str, request: Request, db: AsyncSession = Depe
                         else:
                             ports = [str(public_port)]
                     else:
-                        # Ensure ports are in the correct format (list of strings like "8080=127.0.0.1:8080")
                         if isinstance(ports, list) and ports:
-                            # Process each port individually to handle different formats
                             processed_ports = []
                             for p in ports:
                                 if not p:
                                     continue
                                 if isinstance(p, str):
-                                    # Already a string - check if it needs conversion
                                     if '=' in p:
-                                        # Already in correct format "port=host:port"
                                         processed_ports.append(p)
                                     elif p.isdigit():
-                                        # Just a port number - convert to format
                                         processed_ports.append(f"{p}={target_host}:{p}")
                                     else:
-                                        # Some other string format - use as-is
                                         processed_ports.append(p)
                                 elif isinstance(p, int):
-                                    # Number - convert to proper format
                                     processed_ports.append(f"{p}={target_host}:{p}")
                                 elif isinstance(p, dict):
-                                    # Dictionary format - extract and convert
                                     local = p.get("local") or p.get("listen_port") or p.get("public_port")
                                     tgt_host = p.get("target_host") or target_host
                                     tgt_port = p.get("target_port") or p.get("remote_port") or local
                                     if local:
                                         processed_ports.append(f"{local}={tgt_host}:{tgt_port}")
                                 else:
-                                    # Fallback: convert to string
                                     processed_ports.append(str(p))
                             ports = processed_ports
                     

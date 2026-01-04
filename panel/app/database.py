@@ -25,28 +25,23 @@ async def migrate_db():
         return
     
     async with engine.begin() as conn:
-        # Check if tunnels table exists and get its columns
         result = await conn.execute(text(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='tunnels'"
         ))
         if not result.scalar():
-            # Table doesn't exist, create_all will handle it
             return
         
-        # Check if foreign_node_id column exists
         result = await conn.execute(text(
             "PRAGMA table_info(tunnels)"
         ))
         columns = [row[1] for row in result.fetchall()]
         
-        # Add foreign_node_id if it doesn't exist
         if "foreign_node_id" not in columns:
             logger.info("Adding foreign_node_id column to tunnels table")
             await conn.execute(text(
                 "ALTER TABLE tunnels ADD COLUMN foreign_node_id VARCHAR"
             ))
         
-        # Add iran_node_id if it doesn't exist
         if "iran_node_id" not in columns:
             logger.info("Adding iran_node_id column to tunnels table")
             await conn.execute(text(

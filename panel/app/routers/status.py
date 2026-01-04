@@ -20,9 +20,7 @@ async def get_version():
     import subprocess
     from pathlib import Path
     
-    # Try to get version from git tag (works in both Docker and local)
     try:
-        # Try git describe to get the latest tag
         result = subprocess.run(
             ["git", "describe", "--tags", "--always", "--dirty"],
             capture_output=True,
@@ -32,17 +30,13 @@ async def get_version():
         )
         if result.returncode == 0:
             git_version = result.stdout.strip()
-            # Clean up git describe output (e.g., "v0.1.0-5-gabc123" -> "v0.1.0")
-            # Or if it's just a tag, use it directly
             if git_version and not git_version.startswith("fatal"):
-                # Remove commit hash and dirty marker if present
                 version = git_version.split("-")[0].lstrip("v")
                 if version and version not in ["next", "latest", "main", "master"]:
                     return {"version": version}
     except:
         pass
     
-    # Try VERSION file (created during Docker build)
     version_file = Path("/app/VERSION")
     if version_file.exists():
         try:
@@ -52,7 +46,6 @@ async def get_version():
         except:
             pass
     
-    # Try Docker image labels
     smite_version = os.getenv("SMITE_VERSION", "")
     if smite_version in ["next", "latest"]:
         try:

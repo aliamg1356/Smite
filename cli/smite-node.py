@@ -176,7 +176,6 @@ def cmd_uninstall(args):
     
     print("\nStarting uninstall...")
     
-    # Stop and remove containers
     print("\n[1/5] Stopping and removing containers...")
     try:
         compose_file = get_compose_file()
@@ -196,7 +195,6 @@ def cmd_uninstall(args):
     except Exception as e:
         print(f"  ⚠️  Warning: {e}")
     
-    # Remove volumes
     print("\n[2/5] Removing Docker volumes...")
     try:
         result = subprocess.run(["docker", "volume", "ls", "-q", "--filter", "name=smite-node"], 
@@ -209,7 +207,6 @@ def cmd_uninstall(args):
     except Exception as e:
         print(f"  ⚠️  Warning: {e}")
     
-    # Remove images
     print("\n[3/5] Removing Docker images...")
     try:
         subprocess.run(["docker", "rmi", "-f", "ghcr.io/zzedix/smite-node"], capture_output=True, check=False)
@@ -223,7 +220,6 @@ def cmd_uninstall(args):
     except Exception as e:
         print(f"  ⚠️  Warning: {e}")
     
-    # Remove installation directory
     print("\n[4/5] Removing installation directory...")
     install_dirs = [Path("/opt/smite-node"), Path("/usr/local/node")]
     for install_dir in install_dirs:
@@ -236,7 +232,6 @@ def cmd_uninstall(args):
         else:
             print(f"  - {install_dir} does not exist")
     
-    # Remove CLI script
     print("\n[5/5] Removing CLI script...")
     cli_path = Path("/usr/local/bin/smite-node")
     if cli_path.exists():

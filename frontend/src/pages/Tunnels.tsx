@@ -850,7 +850,7 @@ const EditTunnelModal = ({ tunnel, onClose, onSuccess }: EditTunnelModalProps) =
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Token (Optional)
+                    Token (Optional - Auto-generated if empty)
                   </label>
                   <input
                     type="text"
@@ -859,9 +859,9 @@ const EditTunnelModal = ({ tunnel, onClose, onSuccess }: EditTunnelModalProps) =
                       setFormData({ ...formData, frp_token: e.target.value })
                     }
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
-                    placeholder="authentication-token"
+                    placeholder="Leave empty for auto-generation"
                   />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Authentication token (optional)</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Authentication token (will be auto-generated if not provided)</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -1013,11 +1013,12 @@ const AddTunnelModal = ({ nodes, servers, onClose, onSuccess }: AddTunnelModalPr
         const remoteHost = window.location.hostname
         const remotePort = formData.rathole_remote_addr || '23333'
         spec.remote_addr = `${remoteHost}:${remotePort}`
-        spec.token = formData.rathole_token
-        // For Rathole, ports are equal (panel local port = node local port = proxy_port)
-        spec.ports = ports  // Store multiple ports
-        spec.remote_port = ports[0]  // Keep first port for backward compatibility
-        spec.listen_port = ports[0]  // Keep first port for backward compatibility
+        if (formData.rathole_token) {
+          spec.token = formData.rathole_token
+        }
+        spec.ports = ports
+        spec.remote_port = ports[0]
+        spec.listen_port = ports[0]
       }
       
       if (formData.core === 'chisel') {
@@ -1096,16 +1097,15 @@ const AddTunnelModal = ({ nodes, servers, onClose, onSuccess }: AddTunnelModalPr
           return
         }
         const bindPort = parseInt(formData.frp_bind_port) || 7000
-        // For FRP, ports are equal (remote_port = local_port)
         spec.bind_port = bindPort
-        spec.ports = ports  // Store multiple ports
-        spec.listen_port = ports[0]  // Keep first port for backward compatibility
-        spec.remote_port = ports[0]  // Keep first port for backward compatibility
+        spec.ports = ports
+        spec.listen_port = ports[0]
+        spec.remote_port = ports[0]
         if (formData.frp_token) {
           spec.token = formData.frp_token
         }
         spec.local_ip = formData.frp_local_ip || '127.0.0.1'
-        spec.local_port = ports[0]  // Keep first port for backward compatibility
+        spec.local_port = ports[0]
         spec.type = formData.type === 'udp' ? 'udp' : 'tcp'
         tunnelType = formData.type === 'udp' ? 'udp' : 'tcp'
       }
@@ -1119,7 +1119,19 @@ const AddTunnelModal = ({ nodes, servers, onClose, onSuccess }: AddTunnelModalPr
         iran_node_id: formData.iran_node_id || formData.node_id || null,
         spec: spec,
       }
-      await api.post('/tunnels', payload)
+      const response = await api.post('/tunnels', payload)
+      
+      if (response.data?.spec) {
+        const generatedToken = response.data.spec.token || response.data.spec.auth
+        if (generatedToken) {
+          const tokenType = formData.core === 'chisel' ? 'Auth' : 'Token'
+          const userProvidedToken = formData.rathole_token || formData.frp_token || (formData.core === 'backhaul' && backhaulState.token)
+          if (!userProvidedToken) {
+            alert(`${tokenType} generated: ${generatedToken}\n\nPlease save this ${tokenType.toLowerCase()} for future reference.`)
+          }
+        }
+      }
+      
       onSuccess()
     } catch (error) {
       console.error('Failed to create tunnel:', error)
@@ -1385,7 +1397,7 @@ const AddTunnelModal = ({ nodes, servers, onClose, onSuccess }: AddTunnelModalPr
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Token
+                  Token (Optional - Auto-generated if empty)
                 </label>
                 <input
                   type="text"
@@ -1394,10 +1406,9 @@ const AddTunnelModal = ({ nodes, servers, onClose, onSuccess }: AddTunnelModalPr
                     setFormData({ ...formData, rathole_token: e.target.value })
                   }
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
-                  placeholder="your-token"
-                  required
+                  placeholder="Leave empty for auto-generation"
                 />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Authentication token</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Authentication token (will be auto-generated if not provided)</p>
               </div>
             </div>
             </>
@@ -1490,7 +1501,7 @@ const AddTunnelModal = ({ nodes, servers, onClose, onSuccess }: AddTunnelModalPr
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Token (Optional)
+                    Token (Optional - Auto-generated if empty)
                   </label>
                   <input
                     type="text"
@@ -1499,9 +1510,9 @@ const AddTunnelModal = ({ nodes, servers, onClose, onSuccess }: AddTunnelModalPr
                       setFormData({ ...formData, frp_token: e.target.value })
                     }
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
-                    placeholder="authentication-token"
+                    placeholder="Leave empty for auto-generation"
                   />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Authentication token (optional)</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Authentication token (will be auto-generated if not provided)</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -1689,15 +1700,16 @@ function BackhaulForm({
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Token
+            Token (Optional - Auto-generated if empty)
           </label>
           <input
             type="text"
             value={state.token}
             onChange={(e) => onChange({ token: e.target.value })}
             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
-            placeholder="Optional authentication token"
+            placeholder="Leave empty for auto-generation"
           />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Authentication token (will be auto-generated if not provided)</p>
         </div>
       </div>
 
